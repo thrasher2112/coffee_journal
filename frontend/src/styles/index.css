@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #1b1614;
+  color: #f8f1e8;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #2a1f1b 0%, #1b1614 55%, #120d0b 100%);
+  background-attachment: fixed;
+}
+
+.journal-card {
+  background: linear-gradient(135deg, rgba(248, 241, 232, 0.96), rgba(242, 230, 214, 0.9));
+  border-radius: 18px;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(200, 156, 115, 0.35);
+  position: relative;
+}
+
+.journal-card::after {
+  content: '';
+  position: absolute;
+  inset: 20px 16px;
+  border-top: 1px dashed rgba(86, 100, 93, 0.35);
+  border-bottom: 1px dashed rgba(86, 100, 93, 0.25);
+  pointer-events: none;
+}
+
+.paper-lines {
+  background-image: repeating-linear-gradient(
+    180deg,
+    rgba(86, 100, 93, 0.3) 0,
+    rgba(86, 100, 93, 0.3) 1px,
+    transparent 1px,
+    transparent 32px
+  );
+}

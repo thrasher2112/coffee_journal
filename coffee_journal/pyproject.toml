@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coffee-journal"
+version = "0.1.0"
+description = "Coffee tasting journal powered by FastAPI and Postgres"
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{name = "Coffee Journal Maintainers"}]
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]

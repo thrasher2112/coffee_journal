@@ -1,0 +1,10 @@
+:root {
+  --color-night: #1b1614;
+  --color-espresso: #3b2924;
+  --color-caramel: #c89c73;
+  --color-crema: #f8f1e8;
+  --color-moss: #56645d;
+  --color-ember: #a8563c;
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
