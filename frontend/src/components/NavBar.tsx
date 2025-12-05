@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 const links = [
   { to: '/', label: 'Home' },
   { to: '/beans', label: 'Beans' },
+  { to: '/all-cups', label: 'All Cups' },
   { to: '/best-cups', label: 'Best Cups' },
   { to: '/settings', label: 'Settings' }
 ];

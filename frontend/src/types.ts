@@ -18,6 +18,10 @@ export interface Bean {
   notes?: string;
   created_at: string;
   updated_at: string;
+  first_used_at?: string | null;
+  last_used_at?: string | null;
+  avg_rating?: number | null;
+  brew_count?: number;
 }
 
 export interface Brew {

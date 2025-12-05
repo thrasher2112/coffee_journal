@@ -5,6 +5,7 @@ import { BeansPage } from './pages/Beans';
 import { BrewFormPage } from './pages/BrewForm';
 import { SettingsPage } from './pages/Settings';
 import { BestCupsPage } from './pages/BestCups';
+import { AllCupsPage } from './pages/AllCups';
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/brew" element={<BrewFormPage />} />
             <Route path="/beans" element={<BeansPage />} />
+            <Route path="/all-cups" element={<AllCupsPage />} />
             <Route path="/best-cups" element={<BestCupsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>

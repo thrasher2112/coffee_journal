@@ -1,7 +1,7 @@
 """Pydantic schemas for Bean resources."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -33,6 +33,10 @@ class BeanRead(BeanBase):
     id: str
     created_at: datetime
     updated_at: datetime
+    first_used_at: Optional[date] = None
+    last_used_at: Optional[date] = None
+    avg_rating: Optional[float] = None
+    brew_count: int = 0
     model_config = ConfigDict(from_attributes=True)
 
 

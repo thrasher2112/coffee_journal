@@ -72,6 +72,32 @@ export function HomePage() {
     return [...local, ...remote];
   }, [brews, localBrews, beans]);
 
+  const sortedTrendData = useMemo(() => {
+    if (!metrics?.rating_trends) return [];
+    const parseWeekLabel = (label: string) => {
+      const [yearStr, weekStr] = label.split('-');
+      const year = Number(yearStr);
+      const week = Number(weekStr);
+      if (Number.isNaN(year) || Number.isNaN(week)) return null;
+      const firstThursday = new Date(Date.UTC(year, 0, 1));
+      const day = firstThursday.getUTCDay();
+      const diff = (week - 1) * 7 + (day <= 4 ? 0 : 7);
+      firstThursday.setUTCDate(firstThursday.getUTCDate() + diff);
+      return firstThursday;
+    };
+    return metrics.rating_trends
+      .filter((trend) => typeof trend.avg_rating === 'number')
+      .map((trend) => {
+        const parsedDate = parseWeekLabel(trend.week);
+        const sortValue = parsedDate ? parsedDate.getTime() : 0;
+        const displayLabel = parsedDate
+          ? parsedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : trend.week;
+        return { ...trend, sortValue, displayLabel };
+      })
+      .sort((a, b) => a.sortValue - b.sortValue);
+  }, [metrics]);
+
   return (
     <div className="space-y-8">
       {error && <div className="rounded-2xl border border-ember/50 bg-ember/20 p-3 text-sm text-crema">{error}</div>}
@@ -80,14 +106,14 @@ export function HomePage() {
       <section className="grid gap-6 md:grid-cols-2">
         <article className="journal-card p-6">
           <h3 className="text-xl font-display text-espresso">Rating trend</h3>
-          {metrics ? (
+          {sortedTrendData.length ? (
             <Line
               data={{
-                labels: metrics.rating_trends.map((m) => m.week),
+                labels: sortedTrendData.map((m) => m.displayLabel),
                 datasets: [
                   {
                     label: 'Avg rating',
-                    data: metrics.rating_trends.map((m) => m.avg_rating),
+                    data: sortedTrendData.map((m) => m.avg_rating ?? 0),
                     borderColor: '#A8563C',
                     backgroundColor: 'rgba(168, 86, 60, 0.2)',
                     tension: 0.4,

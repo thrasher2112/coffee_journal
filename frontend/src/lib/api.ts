@@ -12,11 +12,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(`Request failed: ${res.status}`);
   }
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
-export async function fetchBeans(): Promise<Bean[]> {
-  const data = await request<{ items: Bean[]; total: number }>(`/api/beans/`);
+type BeanFilters = {
+  q?: string;
+  firstUsedAfter?: string;
+  lastUsedBefore?: string;
+};
+
+export async function fetchBeans(filters?: BeanFilters): Promise<Bean[]> {
+  const params = new URLSearchParams();
+  if (filters?.q) params.set('q', filters.q);
+  if (filters?.firstUsedAfter) params.set('first_used_after', filters.firstUsedAfter);
+  if (filters?.lastUsedBefore) params.set('last_used_before', filters.lastUsedBefore);
+  const query = params.toString();
+  const data = await request<{ items: Bean[]; total: number }>(`/api/beans/${query ? `?${query}` : ''}`);
   return data.items;
 }
 
@@ -24,6 +38,25 @@ export async function createBean(bean: Partial<Bean>) {
   return request<Bean>(`/api/beans/`, {
     method: 'POST',
     body: JSON.stringify(bean)
+  });
+}
+
+export async function updateBean(beanId: string, bean: Partial<Bean>) {
+  return request<Bean>(`/api/beans/${beanId}`, {
+    method: 'PUT',
+    body: JSON.stringify(bean)
+  });
+}
+
+export async function deleteBean(beanId: string) {
+  return request<void>(`/api/beans/${beanId}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function copyBean(beanId: string) {
+  return request<Bean>(`/api/beans/${beanId}/copy`, {
+    method: 'POST'
   });
 }
 
