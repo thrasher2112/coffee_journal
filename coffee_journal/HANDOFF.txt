@@ -2,22 +2,26 @@ Coffee Journal Handoff Summary
 ------------------------------
 
 Current Repository State
-- Root-level `docker-compose.yml` now orchestrates `db` (Postgres 16), `api` (FastAPI + Alembic seed runner), and `web` (React/Vite/Tailwind PWA). `docker compose up --build` from repo root boots the full stack (API :8000, frontend :3000).
-- Backend (`coffee_journal/src/coffee_journal`) contains SQLAlchemy models for Beans & Brews, Pydantic schemas, CRUD modules, routers for beans/brews/metrics/import-export, Alembic migrations, and a seed script adding 3 beans + 2 brews. Health + `/api/*` endpoints documented in OpenAPI.
-- Tests: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` run via `python -m pytest` (SQLite in-memory). Ruff enforced via `pyproject.toml`.
-- Frontend lives in `frontend/` (React + Vite + Tailwind). It implements the Quick Log, Beans admin, Best Cups dashboard, Settings (offline vault, import/export, sync stub), style guide (`src/assets/style-guide.md`), and PWA assets (manifest + SW). Styling references `codex/coffee_journal/style_example.jpg` with dark café aesthetic.
-- Documentation: `PROTOTYPE.md` updated with runbook + curl examples; `coffee_journal/README.md` lists Docker/PWA flow; `HANDOFF.txt` (this doc) summarizes status.
+- Root `docker-compose.yml` orchestrates Postgres 16 (`db`), FastAPI (`api` + Alembic + seed runner), and the React/Tailwind PWA (`web`). `docker compose up --build` from repo root boots the full stack (API :8000, frontend :3000).
+- Backend (`coffee_journal/src/coffee_journal`) now exposes enriched bean metadata (first/last brew dates, average rating, brew counts) plus brew-style-aware logging. Routers cover beans/brews/metrics/import/export/sync, with Alembic migrations (latest adds `brew_style` column).
+- Tests: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` run via `pytest` (SQLite in-memory). Ruff is configured via `pyproject.toml`.
+- Frontend (`frontend/`) includes Quick Brew with style presets, an enhanced Beans library (search, filters, edit/copy/delete), Best Cups, the new All Cups archive (reverse-chronological), Settings (offline vault/import/export), and style guide assets.
+- Documentation: updated `AGENTS.md`, `coffee_journal/README.md`, and `docs/STRUCTURE.md` cover contributor workflow, runbooks, and architecture.
 
 Infrastructure & Commands
 - `.env.example` (copy to `.env`) defines DB creds plus `API_URL`/`FRONTEND_URL`/`VITE_API_URL`. Compose + Makefiles read it automatically.
 - Make targets (repo root `Makefile`): `docker-up`, `docker-down`, `migrate`, `seed`, `frontend-build`, `api-test`. API-specific commands also live in `coffee_journal/Makefile`.
-- Backend container entrypoint runs `alembic upgrade head` + `python -m coffee_journal.scripts.seed_db` before uvicorn. Frontend container builds static assets then serves via `serve -s dist -l 3000`.
+- Backend container entrypoint runs `alembic upgrade head` + `python -m coffee_journal.scripts.seed_db` before launching uvicorn. Frontend container builds `npm run build` output and serves via `serve -s dist -l 3000`.
+- Manual commands:
+  - Backend dev: `cd coffee_journal && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+  - Frontend dev: `cd frontend && npm install && npm run dev`
+  - Standalone migrations: `cd coffee_journal && alembic upgrade head`
 
 Direction & Next Steps
-- Extend models/routes for cupping sessions + auth once requirements settle; wire `sync/google-drive` stub to OAuth + Drive APIs.
-- Harden import/export (validation + pagination) and add multi-tenant guard rails if cafes share a deployment.
-- Expand frontend charts (bean leaderboard filters, agitation timeline editor improvements) and add testing (frontend smoke build already exists via `npm run build`).
-- Decide on auth (magic links vs OAuth) and storage for photo attachments; update schemas + UI accordingly.
-- Keep styling aligned with `style_example.jpg` + `frontend/src/assets/style-guide.md` when adding new surfaces.
+- Build cupping-session tracking + authentication (magic links vs OAuth TBD) so cafés can collaborate safely.
+- Harden import/export (validation, pagination) and multi-tenant safeguards if multiple shops share an instance.
+- Implement Drive sync behind the existing stub, including OAuth flow + job queue.
+- Add frontend tests (React Testing Library) for Beans filters/edit mode, Quick Brew style presets, and All Cups ordering.
+- Explore media uploads (brew photos) and storage strategy; update schemas/UI accordingly.
 
 Use this summary as the context packet when continuing work in GPT 5.1.

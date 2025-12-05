@@ -1,34 +1,52 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-This repo hosts the Codex AI stack for containerized agents. Keep the root tidy:
+Coffee Journal ships as a FastAPI backend (`coffee_journal/`) and a Vite/React frontend (`frontend/`) orchestrated via the root `docker-compose.yml`. The stack exposes API port `8000` and web port `3000`.
 
+## Project Structure
 ```
 .
-├── agents/              # agent configs, prompts, tools
-├── src/                 # shared Python services/utilities
-├── tests/               # unit & integration suites
-├── assets/              # sample datasets, conversation logs
-├── docs/                # design notes, diagrams
-└── docker-compose.yml   # Open WebUI + runtime orchestration
+├── AGENTS.md
+├── coffee_journal/          # FastAPI service, Alembic, tests, docs
+│   ├── src/coffee_journal   # config, routers, CRUD, models, scripts
+│   ├── tests/               # pytest suites (SQLite in-memory)
+│   ├── alembic/             # migrations
+│   └── README.md            # backend runbook
+├── frontend/                # React + Vite PWA
+│   └── src/                 # pages, components, lib/api, styles
+├── docs/STRUCTURE.md        # architecture map
+├── docker-compose.yml       # db + api + web services
+└── Makefile                 # helper targets (docker-up, migrate, etc.)
 ```
 
-Add runtime-specific env files under `configs/<service>.env`. Shared helper scripts belong in `scripts/` with the executable bit set.
-
-## Build, Test, and Development Commands
-- `docker compose up -d openwebui` boots the default UI backed by the data volume; use `docker compose down --remove-orphans` to reset.
-- `docker compose exec openwebui bash` gives you a shell for manual checks or running migrations.
-- `python -m venv .venv && source .venv/bin/activate` provisions the local toolchain; install agent dependencies with `pip install -r requirements.txt`.
-- `pytest tests/unit` runs fast checks; `pytest tests/integration -m smoke` validates cross-agent workflows before pushing.
-
-## Coding Style & Naming Conventions
-Write Python modules with Black/PEP8 defaults (4-space indents, double quotes). Run `ruff check src agents` to enforce linting. YAML/JSON manifest files use two spaces, kebab-case keys, and descriptive IDs such as `assistant_router`. Agents live in `agents/<agent_name>/<agent_name>.yaml`; supporting modules follow snake_case filenames.
+## Development Workflow
+- Copy `coffee_journal/.env.example` to `.env`, then run `docker compose up --build` from repo root to start Postgres, API, and Web.
+- Backend dev:
+  - `cd coffee_journal`
+  - `python -m venv .venv && source .venv/bin/activate`
+  - `pip install -r requirements.txt`
+  - `uvicorn coffee_journal.main:app --reload`
+- Frontend dev:
+  - `cd frontend && npm install`
+  - `npm run dev`
+- Apply migrations with `cd coffee_journal && alembic upgrade head`. The API container also runs migrations + seeds automatically on boot.
+- Build static assets with `cd frontend && npm run build` (Compose does this during image build as well).
 
 ## Testing Guidelines
-Every feature needs unit coverage plus one integration scenario describing the agent handshake. Name tests `test_<feature>.py` and classes `Test<Feature>`. Target ≥85% branch coverage (`pytest --cov=src --cov=agents`). When touching Compose, run `docker compose config` to verify syntax before merging.
+- Backend tests live in `coffee_journal/tests`. Run `pytest` from `coffee_journal/` (SQLite in-memory DB). Keep regression coverage for new routers/CRUD helpers.
+- Linting: `ruff check coffee_journal/src`.
+- Frontend currently relies on manual/visual QA; add React Testing Library coverage when touching complex logic (QuickLog, Beans filters, All Cups sorting).
 
-## Commit & Pull Request Guidelines
-Write commits using Conventional Commits (`feat: add planner agent`, `fix: tighten auth middleware`). Keep commits scoped and include rationale in the body when bumping dependencies. PRs must describe the change, include testing evidence (command output or screenshots from Open WebUI), reference issues (`Closes #123`), and mention follow-up work if deferred. Request review from another agent maintainer whenever altering docker orchestration or shared libraries.
+## Coding Standards
+- Python: Black/PEP8, prefer dataclass settings, SQLAlchemy 2.0 style ORM, Pydantic v2 `model_validate`.
+- TypeScript/React: functional components, hooks, Tailwind utility classes. Co-locate small helpers (e.g., `lib/api.ts`) and keep stateful pages under `src/pages`.
+- Commits follow Conventional Commits (e.g., `feat: add all cups page`, `fix: beans filter timezone math`).
 
-## Security & Configuration Tips
-Keep secrets in `.env.local` files excluded via `.gitignore`; never hardcode API keys. Rotate service tokens in `openwebui-data` when contributors leave. Validate any new third-party tools in a sandbox container before wiring them into production Compose profiles.
+## Release & Ops Notes
+- `docker compose up --build` is the canonical way to boot prod parity locally.
+- Makefile shortcuts: `make docker-up`, `make docker-down`, `make migrate`, `make seed`, `make frontend-build`.
+- Seeds (`coffee_journal/src/coffee_journal/scripts/seed_db.py`) load demo beans/brews; rerun after dropping data to keep dashboards populated.
+
+## Security & Configuration
+- Never commit `.env` files; secrets stay in local `.env` copies (ignored via `.gitignore`).
+- Postgres credentials default to `postgres/postgres`; adjust in `.env` for shared deployments.
+- When wiring new third-party services (Drive sync, auth), prototype inside containers before exposing credentials, and document required environment vars in `coffee_journal/.env.example`.
