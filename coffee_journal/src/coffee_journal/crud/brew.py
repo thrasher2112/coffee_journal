@@ -93,26 +93,13 @@ def metrics_overview(db: Session) -> dict:
     )
     rating_trends_query = (
         select(
-            func.strftime("%Y-%W", Brew.date).label("week"),
+            Brew.date.label("bucket_date"),
             func.avg(Brew.rating).label("avg_rating"),
             func.count(Brew.id).label("count"),
         )
-        .group_by("week")
-        .order_by("week")
+        .group_by(Brew.date)
+        .order_by(Brew.date)
     )
-
-    # SQLite compatibility: strftime not available in Postgres; fallback to date_trunc.
-    dialect_name = getattr(getattr(db, "bind", None), "dialect", None)
-    if getattr(dialect_name, "name", None) == "postgresql":
-        rating_trends_query = (
-            select(
-                func.to_char(func.date_trunc("week", Brew.date), "IYYY-IW").label("week"),
-                func.avg(Brew.rating).label("avg_rating"),
-                func.count(Brew.id).label("count"),
-            )
-            .group_by("week")
-            .order_by("week")
-        )
 
     top_beans = [
         {
@@ -132,14 +119,21 @@ def metrics_overview(db: Session) -> dict:
         }
         for row in db.execute(recent_brews_query)
     ]
-    rating_trends = [
-        {
-            "week": row.week,
-            "avg_rating": float(row.avg_rating) if row.avg_rating is not None else None,
-            "count": row.count,
-        }
-        for row in db.execute(rating_trends_query)
-    ]
+    rating_trends = []
+    for row in db.execute(rating_trends_query):
+        bucket_date = row.bucket_date
+        iso_week = None
+        if isinstance(bucket_date, date):
+            iso_year, iso_week_number, _ = bucket_date.isocalendar()
+            iso_week = f"{iso_year}-{iso_week_number:02d}"
+        rating_trends.append(
+            {
+                "date": bucket_date.isoformat() if bucket_date else None,
+                "iso_week": iso_week,
+                "avg_rating": float(row.avg_rating) if row.avg_rating is not None else None,
+                "count": row.count,
+            }
+        )
 
     return {
         "top_beans": top_beans,

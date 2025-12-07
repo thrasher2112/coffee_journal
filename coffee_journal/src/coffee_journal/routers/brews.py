@@ -44,7 +44,7 @@ def list_brews(
 
 @router.post("/", response_model=BrewRead, status_code=status.HTTP_201_CREATED)
 def create_brew(payload: BrewCreate, db: Session = Depends(get_db)):
-    brew = crud.brew.create_brew(db, payload.dict())
+    brew = crud.brew.create_brew(db, payload.model_dump())
     db.refresh(brew, attribute_names=["bean"])
     return _to_schema(brew)
 
@@ -63,7 +63,7 @@ def update_brew(brew_id: str, payload: BrewUpdate, db: Session = Depends(get_db)
     brew = crud.brew.get_brew(db, brew_id)
     if not brew:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brew not found")
-    brew = crud.brew.update_brew(db, brew, payload.dict(exclude_unset=True))
+    brew = crud.brew.update_brew(db, brew, payload.model_dump(exclude_unset=True))
     db.refresh(brew, attribute_names=["bean"])
     return _to_schema(brew)
 

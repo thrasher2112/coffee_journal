@@ -47,7 +47,7 @@ def list_beans(
 
 @router.post("/", response_model=BeanRead, status_code=status.HTTP_201_CREATED)
 def create_bean(payload: BeanCreate, db: Session = Depends(get_db)):
-    return crud.bean.create_bean(db, payload.dict())
+    return crud.bean.create_bean(db, payload.model_dump())
 
 
 @router.get("/{bean_id}", response_model=BeanRead)
@@ -63,7 +63,7 @@ def update_bean(bean_id: str, payload: BeanUpdate, db: Session = Depends(get_db)
     bean = crud.bean.get_bean(db, bean_id)
     if not bean:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
-    return crud.bean.update_bean(db, bean, payload.dict(exclude_unset=True))
+    return crud.bean.update_bean(db, bean, payload.model_dump(exclude_unset=True))
 
 
 @router.delete("/{bean_id}", status_code=status.HTTP_204_NO_CONTENT)

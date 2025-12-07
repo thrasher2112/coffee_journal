@@ -1,12 +1,22 @@
 export type FlavorTag =
-  | 'fruity'
-  | 'floral'
-  | 'citrus'
-  | 'chocolate'
-  | 'caramel'
-  | 'nutty'
-  | 'spice'
-  | 'herbal';
+  | 'Chocolatey'
+  | 'Nutty'
+  | 'Caramel'
+  | 'Fruity'
+  | 'Berry'
+  | 'Citrus'
+  | 'Floral'
+  | 'Spicy';
+
+export type AromaTag =
+  | 'Chocolate'
+  | 'Nutty'
+  | 'Caramel'
+  | 'Floral'
+  | 'Fruity'
+  | 'Spicy'
+  | 'Toasty'
+  | 'Earthy';
 
 export interface Bean {
   id: string;
@@ -30,6 +40,7 @@ export interface Brew {
   bean_id: string;
   bean_name?: string;
   brew_style?: string;
+  grinder_name?: string;
   bean_weight_g: number;
   water_weight_g: number;
   grind_setting?: string;
@@ -40,7 +51,10 @@ export interface Brew {
   agitation_events?: AgitationEvent[];
   tasting_notes?: string;
   flavor_tags?: FlavorTag[];
+  aroma_tags?: AromaTag[];
   rating?: number;
+  aroma_rating?: number;
+  flavor_rating?: number;
   ratio?: number;
   created_at: string;
   updated_at: string;
@@ -56,6 +70,7 @@ export interface BrewDraft {
   id?: string;
   bean_id?: string;
   brew_style?: string;
+  grinder_name?: string;
   bean_weight_g: number;
   water_weight_g: number;
   date: string;
@@ -67,7 +82,10 @@ export interface BrewDraft {
   agitation_events: AgitationEvent[];
   tasting_notes?: string;
   flavor_tags: FlavorTag[];
+  aroma_tags?: AromaTag[];
   rating?: number;
+  aroma_rating?: number;
+  flavor_rating?: number;
   quick_notes?: string;
 }
 
@@ -77,8 +95,16 @@ export interface LocalBrew extends BrewDraft {
   created_at: string;
 }
 
+export type RatingTrendPoint = {
+  date?: string | null;
+  iso_week?: string | null;
+  week?: string | null;
+  avg_rating?: number | null;
+  count: number;
+};
+
 export interface MetricsOverview {
   top_beans: Array<{ bean_id: string; bean_name: string; brew_count: number; avg_rating: number }>;
   recent_brews: Array<{ brew_id: string; bean_name: string; date: string; rating?: number }>;
-  rating_trends: Array<{ week: string; avg_rating: number; count: number }>;
+  rating_trends: RatingTrendPoint[];
 }

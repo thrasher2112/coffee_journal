@@ -15,9 +15,13 @@ def test_create_brew_flow(client):
         "bean_weight_g": 18,
         "water_weight_g": 288,
         "brew_style": "pour-over",
-        "grind_setting": "V60",
+        "grinder_name": "Baratza Encore",
+        "grind_setting": "18",
         "rating": 9,
-        "flavor_tags": ["citrus", "floral"],
+        "flavor_tags": ["Citrus", "Floral"],
+        "aroma_rating": 8,
+        "flavor_rating": 9,
+        "aroma_tags": ["Floral", "Fruity"],
     }
 
     resp = client.post("/api/brews/", json=brew_payload)
@@ -26,6 +30,10 @@ def test_create_brew_flow(client):
     assert brew["bean_id"] == bean_id
     assert brew["brew_style"] == "pour-over"
     assert brew["ratio"] == 16.0
+    assert brew["grinder_name"] == "Baratza Encore"
+    assert brew["aroma_rating"] == 8
+    assert brew["flavor_rating"] == 9
+    assert set(brew["aroma_tags"]) == {"Floral", "Fruity"}
 
     list_resp = client.get("/api/brews/?bean_id=" + bean_id)
     assert list_resp.status_code == 200

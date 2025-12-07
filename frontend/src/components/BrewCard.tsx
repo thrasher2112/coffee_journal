@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Brew } from '../types';
 import { AgitationTimeline } from './AgitationTimeline';
 import { clsx } from 'clsx';
+import { usePreferences } from '../contexts/PreferencesContext';
 
 interface Props {
   brew: Brew;
@@ -9,6 +10,17 @@ interface Props {
 
 export function BrewCard({ brew }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const { preferences } = usePreferences();
+
+  const displayWaterTemp = useMemo(() => {
+    if (!brew.water_temp_c) return '—';
+    if (preferences.temperatureUnit === 'fahrenheit') {
+      const fahrenheit = Math.round((brew.water_temp_c * 9) / 5 + 32);
+      return `${fahrenheit}°F`;
+    }
+    return `${brew.water_temp_c}°C`;
+  }, [brew.water_temp_c, preferences.temperatureUnit]);
+
   return (
     <article className="journal-card relative overflow-hidden p-6 text-espresso">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -41,6 +53,19 @@ export function BrewCard({ brew }: Props) {
         </div>
       )}
 
+      {brew.aroma_tags && brew.aroma_tags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {brew.aroma_tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full border border-ember/40 bg-ember/10 px-3 py-1 text-xs uppercase tracking-wide text-ember"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
       {brew.tasting_notes && (
         <p className="mt-4 rounded-lg bg-crema/80 p-3 text-sm text-espresso/80 shadow-inner">
           {brew.tasting_notes}
@@ -59,7 +84,7 @@ export function BrewCard({ brew }: Props) {
           <dl className="text-sm text-espresso/80">
             <div className="flex justify-between border-b border-moss/30 py-1">
               <dt>Water temp</dt>
-              <dd>{brew.water_temp_c ? `${brew.water_temp_c}°C` : '—'}</dd>
+              <dd>{displayWaterTemp}</dd>
             </div>
             <div className="flex justify-between border-b border-moss/30 py-1">
               <dt>Brew time</dt>
@@ -70,7 +95,13 @@ export function BrewCard({ brew }: Props) {
               <dd>{brew.bloom_time_s ? `${brew.bloom_time_s}s` : '—'}</dd>
             </div>
           </dl>
-          <AgitationTimeline events={brew.agitation_events ?? []} />
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs uppercase tracking-[0.3em] text-moss">
+              <span>Grinder</span>
+              <span>{brew.grinder_name ?? '—'}</span>
+            </div>
+            <AgitationTimeline events={brew.agitation_events ?? []} />
+          </div>
         </div>
       </div>
     </article>

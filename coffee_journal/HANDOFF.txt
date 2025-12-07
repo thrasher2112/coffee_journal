@@ -3,9 +3,9 @@ Coffee Journal Handoff Summary
 
 Current Repository State
 - Root `docker-compose.yml` orchestrates Postgres 16 (`db`), FastAPI (`api` + Alembic + seed runner), and the React/Tailwind PWA (`web`). `docker compose up --build` from repo root boots the full stack (API :8000, frontend :3000).
-- Backend (`coffee_journal/src/coffee_journal`) now exposes enriched bean metadata (first/last brew dates, average rating, brew counts) plus brew-style-aware logging. Routers cover beans/brews/metrics/import/export/sync, with Alembic migrations (latest adds `brew_style` column).
+- Backend (`coffee_journal/src/coffee_journal`) now exposes enriched bean metadata (first/last brew dates, average rating, brew counts) plus brew-style-aware logging. Routers cover beans/brews/metrics/import/export/sync, with Alembic migrations (latest add aroma/flavor ratings, grinder names, and brew_style columns).
 - Tests: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` run via `pytest` (SQLite in-memory). Ruff is configured via `pyproject.toml`.
-- Frontend (`frontend/`) includes Quick Brew with style presets, an enhanced Beans library (search, filters, edit/copy/delete), Best Cups, the new All Cups archive (reverse-chronological), Settings (offline vault/import/export), and style guide assets.
+- Frontend (`frontend/`) includes Quick Brew with style presets, grinder dropdown, °C/°F-aware temperature inputs, advanced agitation builder, aroma/flavor sliders & tags, an enhanced Beans library (search, filters, edit/copy/delete), Best Cups, the All Cups archive, and Settings with measurement + grinder management alongside offline/export tools.
 - Documentation: updated `AGENTS.md`, `coffee_journal/README.md`, and `docs/STRUCTURE.md` cover contributor workflow, runbooks, and architecture.
 
 Infrastructure & Commands
@@ -21,7 +21,7 @@ Direction & Next Steps
 - Build cupping-session tracking + authentication (magic links vs OAuth TBD) so cafés can collaborate safely.
 - Harden import/export (validation, pagination) and multi-tenant safeguards if multiple shops share an instance.
 - Implement Drive sync behind the existing stub, including OAuth flow + job queue.
-- Add frontend tests (React Testing Library) for Beans filters/edit mode, Quick Brew style presets, and All Cups ordering.
+- Add frontend tests (React Testing Library) for Beans filters/edit mode, Quick Brew presets + grinder/temperature preferences, and All Cups ordering.
 - Explore media uploads (brew photos) and storage strategy; update schemas/UI accordingly.
 
 Use this summary as the context packet when continuing work in GPT 5.1.

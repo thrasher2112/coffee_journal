@@ -4,13 +4,19 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class AgitationEvent(BaseModel):
     timestamp_s: int
     action: str
     amount_g: Optional[float] = None
+
+
+def _dedupe_tags(value: Optional[List[str]]):
+    if not value:
+        return value
+    return sorted({tag.strip() for tag in value if tag})
 
 
 class BrewBase(BaseModel):
@@ -21,19 +27,21 @@ class BrewBase(BaseModel):
     brew_style: Optional[str] = Field(None, max_length=50)
     grind_setting: Optional[str] = Field(None, max_length=120)
     grind_setting_notes: Optional[str] = Field(None)
+    grinder_name: Optional[str] = Field(None, max_length=120)
     water_temp_c: Optional[int] = Field(None)
     bloom_time_s: Optional[int] = Field(None)
     total_brew_time_s: Optional[int] = Field(None)
     agitation_events: Optional[List[AgitationEvent]] = Field(None)
     tasting_notes: Optional[str] = Field(None)
     flavor_tags: Optional[List[str]] = Field(None)
+    aroma_tags: Optional[List[str]] = Field(None)
     rating: Optional[int] = Field(None, ge=1, le=10)
+    aroma_rating: Optional[int] = Field(None, ge=1, le=10)
+    flavor_rating: Optional[int] = Field(None, ge=1, le=10)
 
-    @validator("flavor_tags")
+    @field_validator("flavor_tags", "aroma_tags")
     def dedupe_tags(cls, value: Optional[List[str]]):
-        if not value:
-            return value
-        return sorted({tag.strip() for tag in value if tag})
+        return _dedupe_tags(value)
 
 
 class BrewCreate(BrewBase):
@@ -48,19 +56,21 @@ class BrewUpdate(BaseModel):
     brew_style: Optional[str] = Field(None, max_length=50)
     grind_setting: Optional[str] = Field(None, max_length=120)
     grind_setting_notes: Optional[str] = Field(None)
+    grinder_name: Optional[str] = Field(None, max_length=120)
     water_temp_c: Optional[int] = Field(None)
     bloom_time_s: Optional[int] = Field(None)
     total_brew_time_s: Optional[int] = Field(None)
     agitation_events: Optional[List[AgitationEvent]] = Field(None)
     tasting_notes: Optional[str] = Field(None)
     flavor_tags: Optional[List[str]] = Field(None)
+    aroma_tags: Optional[List[str]] = Field(None)
     rating: Optional[int] = Field(None, ge=1, le=10)
+    aroma_rating: Optional[int] = Field(None, ge=1, le=10)
+    flavor_rating: Optional[int] = Field(None, ge=1, le=10)
 
-    @validator("flavor_tags")
+    @field_validator("flavor_tags", "aroma_tags")
     def dedupe_tags(cls, value: Optional[List[str]]):
-        if not value:
-            return value
-        return sorted({tag.strip() for tag in value if tag})
+        return _dedupe_tags(value)
 
 
 class BrewRead(BrewBase):

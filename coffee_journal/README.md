@@ -76,6 +76,8 @@ npm run build        # production bundle
 - **Quick Brew bar** (Home):
   - Pick a bean, enter dose/yield, choose a brew style, and log tasting notes.
   - Ratio chips auto-adjust to the selected style (pour over, Aeropress, French press).
+  - Advanced mode captures water temp, bloom/total time, agitation events, grinder name + grind setting, and separate overall/aroma/flavor ratings with flavor/aroma tags.
+  - Measurement preferences (°C/°F) and grinder options are driven by user settings and stored in each brew (`grinder_name`, `aroma_rating`, `flavor_rating`, `aroma_tags`).
 - **Beans library**:
   - Search by name/roaster/origin or filter by first/last brew dates.
   - Toggle edit mode to update, copy, or delete beans.
@@ -91,6 +93,7 @@ npm run build        # production bundle
 
 - `GET /api/beans`, `POST /api/beans`, `PUT/DELETE /api/beans/{id}`, `POST /api/beans/{id}/copy`
 - `GET/POST /api/brews`
+  - Brew payloads support `grinder_name`, `grind_setting`, `aroma_rating`, `flavor_rating`, and `aroma_tags` in addition to the existing fields.
 - `GET /api/metrics/overview` (top beans, recent brews, rating trend)
 - `GET /export`, `POST /import`, `POST /sync/google-drive`
 - `GET /health`
@@ -101,9 +104,9 @@ See `/docs` for the full OpenAPI schema.
 
 - Run `pytest` inside `coffee_journal/` for backend coverage (`tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py`).
 - Manual frontend smoke tests:
-  1. Log a Quick Brew with each style and verify ratio chips.
+  1. Log a Quick Brew with each style (toggle °C/°F) and verify ratio chips, grinder dropdown, and rating sliders.
   2. Use Beans filters + edit mode actions (edit/copy/delete) and confirm counts update.
-  3. Visit All Cups + Best Cups to ensure ordering and rating thresholds look right.
+  3. Visit All Cups + Best Cups to ensure ordering and rating thresholds look right, and verify Recent Brews shows aroma tags + grinder name.
 - `npm run build` catches TypeScript/ESLint issues during CI or pre-release builds.
 
 ## Style reference

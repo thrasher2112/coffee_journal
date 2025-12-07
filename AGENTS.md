@@ -29,6 +29,7 @@ Coffee Journal ships as a FastAPI backend (`coffee_journal/`) and a Vite/React f
   - `cd frontend && npm install`
   - `npm run dev`
 - Apply migrations with `cd coffee_journal && alembic upgrade head`. The API container also runs migrations + seeds automatically on boot.
+- Latest revisions (`20250220_03` and `20250220_04`) add aroma/flavor rating fields and `grinder_name`; run migrations after pulling to avoid column-missing errors.
 - Build static assets with `cd frontend && npm run build` (Compose does this during image build as well).
 
 ## Testing Guidelines
@@ -40,6 +41,7 @@ Coffee Journal ships as a FastAPI backend (`coffee_journal/`) and a Vite/React f
 - Python: Black/PEP8, prefer dataclass settings, SQLAlchemy 2.0 style ORM, Pydantic v2 `model_validate`.
 - TypeScript/React: functional components, hooks, Tailwind utility classes. Co-locate small helpers (e.g., `lib/api.ts`) and keep stateful pages under `src/pages`.
 - Commits follow Conventional Commits (e.g., `feat: add all cups page`, `fix: beans filter timezone math`).
+- When touching brew payloads, keep the new `grinder_name`, `aroma_rating`, `flavor_rating`, and `aroma_tags` fields wired through schemas, tests, and UI.
 
 ## Release & Ops Notes
 - `docker compose up --build` is the canonical way to boot prod parity locally.

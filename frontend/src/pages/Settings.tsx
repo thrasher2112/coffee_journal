@@ -3,11 +3,14 @@ import { ExportImportModal } from '../components/ExportImportModal';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
 import { importData, syncBrews } from '../lib/api';
 import type { BrewDraft } from '../types';
+import { TemperatureUnit, usePreferences } from '../contexts/PreferencesContext';
 
 export function SettingsPage() {
   const { brews, unsynced, markSynced, importLocal } = useLocalBrewStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const { preferences, setPreference, addGrinder, removeGrinder, setPreferredGrinder } = usePreferences();
+  const [newGrinder, setNewGrinder] = useState('');
 
   const localExport = useMemo(() => ({ localBrews: brews }), [brews]);
 
@@ -83,6 +86,28 @@ export function SettingsPage() {
     }
   };
 
+  const handleTemperatureUnitChange = (unit: TemperatureUnit) => {
+    setPreference('temperatureUnit', unit);
+    setStatus(`Water temperature now displayed in ${unit === 'celsius' ? '°C' : '°F'}.`);
+  };
+
+  const handleAddGrinder = () => {
+    const name = newGrinder.trim();
+    if (!name) {
+      setStatus('Enter a grinder name before adding.');
+      return;
+    }
+    addGrinder(name);
+    setPreferredGrinder(name);
+    setNewGrinder('');
+    setStatus(`Added ${name} to your grinder list.`);
+  };
+
+  const handleRemoveGrinder = (name: string) => {
+    removeGrinder(name);
+    setStatus(`Removed ${name} from your grinder list.`);
+  };
+
   return (
     <section className="space-y-6">
       <header className="journal-card p-6">
@@ -105,6 +130,75 @@ export function SettingsPage() {
           </button>
         </div>
       </header>
+      <section className="journal-card p-6">
+        <h2 className="text-2xl font-display text-espresso">Measurement preferences</h2>
+        <p className="text-sm text-moss">Switch how water temperatures are displayed while logging brews.</p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {(['celsius', 'fahrenheit'] as TemperatureUnit[]).map((unit) => {
+            const active = preferences.temperatureUnit === unit;
+            return (
+              <button
+                key={unit}
+                type="button"
+                onClick={() => handleTemperatureUnitChange(unit)}
+                className={`rounded-full border px-4 py-2 text-sm transition ${
+                  active
+                    ? 'border-ember bg-ember text-crema'
+                    : 'border-caramel/50 bg-transparent text-espresso'
+                }`}
+              >
+                {unit === 'celsius' ? 'Celsius (°C)' : 'Fahrenheit (°F)'}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      <section className="journal-card space-y-4 p-6">
+        <div>
+          <h2 className="text-2xl font-display text-espresso">Preferred grinders</h2>
+          <p className="text-sm text-moss">Manage the grinders that appear in Quick Brew. Set a default to prefill new brews.</p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <input
+            type="text"
+            value={newGrinder}
+            onChange={(event) => setNewGrinder(event.target.value)}
+            placeholder="Add grinder name"
+            className="flex-1 rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-sm text-crema min-w-[220px]"
+          />
+          <button type="button" className="rounded-full bg-ember px-4 py-2 text-sm text-crema" onClick={handleAddGrinder}>
+            Add grinder
+          </button>
+        </div>
+        <ul className="space-y-2 text-sm">
+          {preferences.grinders.map((grinder) => {
+            const active = preferences.preferredGrinder === grinder;
+            return (
+              <li
+                key={grinder}
+                className="flex items-center justify-between rounded-xl border border-caramel/40 bg-espresso/40 px-4 py-2 text-crema"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="preferred-grinder"
+                    checked={active}
+                    onChange={() => setPreferredGrinder(grinder)}
+                  />
+                  <span>{grinder}</span>
+                </div>
+                <button
+                  type="button"
+                  className="text-xs uppercase tracking-[0.3em] text-caramel"
+                  onClick={() => handleRemoveGrinder(grinder)}
+                >
+                  Remove
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
       <ExportImportModal open={modalOpen} onClose={() => setModalOpen(false)} onExport={handleExport} onImport={handleImport} />
     </section>
   );

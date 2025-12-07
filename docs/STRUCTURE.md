@@ -25,7 +25,7 @@ This document explains how the stack is organized so contributors can quickly fi
 - **Database**: `db.py` (SQLAlchemy engine/session). PostgreSQL in production; SQLite in tests.
 - **Models**: `models/bean.py`, `models/brew.py`
   - Beans: metadata for each coffee.
-  - Brews: log entries including brew style (`brew_style`), ratios, tasting notes.
+  - Brews: log entries including brew style (`brew_style`), grinder names/settings, agitation events, aroma/flavor ratings (`aroma_rating`, `flavor_rating`), flavor/aroma tags, ratios, and tasting notes.
 - **Schemas**: `schemas/*.py` define Pydantic models used by routers.
 - **CRUD**: `crud/bean.py`, `crud/brew.py`
   - Beans CRUD now joins against brews to return usage metadata (first/last brew date, avg rating, brew count) and supports copying beans.
@@ -35,7 +35,7 @@ This document explains how the stack is organized so contributors can quickly fi
   - `metrics.py`: top beans, recent brews, rating trends.
   - `data.py`: import/export/sync stubs.
 - **Scripts**: `scripts/seed_db.py` loads demo beans + brews (used on container start).
-- **Migrations**: Alembic revisions live under `alembic/versions`. Latest adds `brew_style` to `brews`.
+- **Migrations**: Alembic revisions live under `alembic/versions`. Latest revisions add brew style plus aroma/grinder fields (`20250220_03`, `20250220_04`); run `alembic upgrade head` after pulling.
 - **Tests**: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` use SQLite in-memory fixtures defined in `tests/conftest.py`.
 
 ## Frontend (React + Vite + Tailwind)
@@ -46,10 +46,10 @@ This document explains how the stack is organized so contributors can quickly fi
   - `AllCupsPage`: new archive listing every brew (newest first).
   - `BestCupsPage`: brews rated ≥ 8.
   - `BrewFormPage`: full brew form (beyond Quick Brew).
-  - `SettingsPage`: import/export + offline tools.
+  - `SettingsPage`: import/export + offline tools, temperature-unit toggle, grinder management (add/remove/preferred), offline vault, sync stubs.
 - **Components**:
-  - `QuickLogBar`: captures brews and now tracks brew style with Hoffmann ratio presets.
-  - `BrewCard`, `BeanPicker`, `FlavorWheel`, etc.
+  - `QuickLogBar`: captures brews with Hoffmann ratio presets, °C/°F-aware temperature inputs, grinder dropdown tied to settings, agitation timeline builder, and separate overall/aroma/flavor sliders.
+  - `BrewCard`, `BeanPicker`, `FlavorWheel`, `AromaTags`, etc. (`BrewCard` respects temperature preferences and surfaces aroma tags + grinder metadata.)
   - `NavBar`: contains navigation links (Home, Beans, All Cups, Best Cups, Settings) plus Quick Log shortcut.
 - **State & Hooks**:
   - `hooks/useLocalBrewStore.ts`: offline queue for unsynced brews.

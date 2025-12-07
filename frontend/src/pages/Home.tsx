@@ -54,6 +54,7 @@ export function HomePage() {
       bean_id: brew.bean_id ?? 'local-draft',
       bean_name: beans.find((b) => b.id === brew.bean_id)?.name ?? 'Local Draft',
       bean_weight_g: brew.bean_weight_g,
+      grinder_name: brew.grinder_name,
       water_weight_g: brew.water_weight_g,
       date: brew.date,
       grind_setting: brew.grind_setting,
@@ -62,8 +63,11 @@ export function HomePage() {
       bloom_time_s: brew.bloom_time_s,
       total_brew_time_s: brew.total_brew_time_s,
       flavor_tags: brew.flavor_tags,
+      aroma_tags: brew.aroma_tags,
       tasting_notes: brew.quick_notes,
       rating: brew.rating,
+      aroma_rating: brew.aroma_rating,
+      flavor_rating: brew.flavor_rating,
       agitation_events: brew.agitation_events,
       created_at: brew.created_at,
       updated_at: brew.created_at,
@@ -74,25 +78,34 @@ export function HomePage() {
 
   const sortedTrendData = useMemo(() => {
     if (!metrics?.rating_trends) return [];
-    const parseWeekLabel = (label: string) => {
+    const parseIsoWeekLabel = (label: string | null | undefined) => {
+      if (!label) return null;
       const [yearStr, weekStr] = label.split('-');
       const year = Number(yearStr);
       const week = Number(weekStr);
       if (Number.isNaN(year) || Number.isNaN(week)) return null;
-      const firstThursday = new Date(Date.UTC(year, 0, 1));
-      const day = firstThursday.getUTCDay();
-      const diff = (week - 1) * 7 + (day <= 4 ? 0 : 7);
-      firstThursday.setUTCDate(firstThursday.getUTCDate() + diff);
+      const firstThursday = new Date(Date.UTC(year, 0, 4));
+      const day = firstThursday.getUTCDay() || 7;
+      firstThursday.setUTCDate(firstThursday.getUTCDate() - day + 1 + (week - 1) * 7);
       return firstThursday;
+    };
+    const parseTrendDate = (trend: MetricsOverview['rating_trends'][number]) => {
+      if (trend.date) {
+        const parsed = new Date(trend.date);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+      return parseIsoWeekLabel(trend.iso_week ?? trend.week);
     };
     return metrics.rating_trends
       .filter((trend) => typeof trend.avg_rating === 'number')
       .map((trend) => {
-        const parsedDate = parseWeekLabel(trend.week);
+        const parsedDate = parseTrendDate(trend);
         const sortValue = parsedDate ? parsedDate.getTime() : 0;
         const displayLabel = parsedDate
           ? parsedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-          : trend.week;
+          : trend.date ?? trend.iso_week ?? trend.week ?? '—';
         return { ...trend, sortValue, displayLabel };
       })
       .sort((a, b) => a.sortValue - b.sortValue);

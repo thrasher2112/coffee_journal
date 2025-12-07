@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import type { Bean, BrewDraft, FlavorTag } from '../types';
+import type { AromaTag, Bean, BrewDraft, FlavorTag } from '../types';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
+import { AromaTags } from './AromaTags';
+import { usePreferences } from '../contexts/PreferencesContext';
 
 interface Props {
   beans: Bean[];
@@ -24,9 +26,13 @@ const BREW_STYLE_PRESETS = {
   },
 } as const;
 
+const DEFAULT_WATER_TEMP = 96;
+const DEFAULT_BLOOM_TIME = 45;
+const DEFAULT_BREW_TIME = 180;
+
 type BrewStyle = keyof typeof BREW_STYLE_PRESETS;
 
-const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over'): BrewDraft => ({
+const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?: string): BrewDraft => ({
   bean_id: beanId,
   bean_weight_g: 18,
   water_weight_g: 288,
@@ -34,14 +40,29 @@ const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over'): BrewDra
   date: new Date().toISOString().slice(0, 10),
   agitation_events: [],
   flavor_tags: [],
+  aroma_tags: [],
   quick_notes: '',
-  rating: 8
+  rating: 8,
+  aroma_rating: 8,
+  flavor_rating: 8,
+  grinder_name: grinder,
+  grind_setting: ''
+});
+
+const withAdvancedDefaults = (draft: BrewDraft): BrewDraft => ({
+  ...draft,
+  water_temp_c: draft.water_temp_c ?? DEFAULT_WATER_TEMP,
+  bloom_time_s: draft.bloom_time_s ?? DEFAULT_BLOOM_TIME,
+  total_brew_time_s: draft.total_brew_time_s ?? DEFAULT_BREW_TIME
 });
 
 export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
+  const { preferences, setPreferredGrinder } = usePreferences();
   const [isAdvanced, setIsAdvanced] = useState(false);
   const [brewStyle, setBrewStyle] = useState<BrewStyle>('pour-over');
-  const [form, setForm] = useState<BrewDraft>(() => makeDraft(defaultBeanId, 'pour-over'));
+  const [form, setForm] = useState<BrewDraft>(() =>
+    makeDraft(defaultBeanId, 'pour-over', preferences.preferredGrinder)
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -58,6 +79,16 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
   }, [defaultBeanId, brewStyle]);
 
   useEffect(() => {
+    if (!preferences.preferredGrinder) return;
+    setForm((prev) => {
+      if (prev.grinder_name) {
+        return prev;
+      }
+      return { ...prev, grinder_name: preferences.preferredGrinder };
+    });
+  }, [preferences.preferredGrinder]);
+
+  useEffect(() => {
     const preferredRatio = BREW_STYLE_PRESETS[brewStyle].ratios[0];
     setForm((prev) => {
       const nextYield = Number((prev.bean_weight_g * preferredRatio).toFixed(1));
@@ -70,8 +101,23 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
     });
   }, [brewStyle]);
 
+  useEffect(() => {
+    if (!isAdvanced) return;
+    setForm((prev) => withAdvancedDefaults(prev));
+  }, [isAdvanced]);
+
+  const handleAdvancedToggle = (checked: boolean) => {
+    setIsAdvanced(checked);
+    if (checked) {
+      setForm((prev) => withAdvancedDefaults(prev));
+    }
+  };
+
   const ratio = useMemo(() => form.water_weight_g / form.bean_weight_g || 0, [form]);
   const stylePresets = BREW_STYLE_PRESETS[brewStyle];
+  const grinderOptions = preferences.grinders;
+  const selectedGrinder =
+    form.grinder_name && grinderOptions.includes(form.grinder_name) ? form.grinder_name : '';
 
   const update = <K extends keyof BrewDraft>(key: K, value: BrewDraft[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -83,6 +129,17 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
       return {
         ...prev,
         flavor_tags: exists ? prev.flavor_tags.filter((item) => item !== tag) : [...prev.flavor_tags, tag]
+      };
+    });
+  };
+
+  const toggleAromaTag = (tag: AromaTag) => {
+    setForm((prev) => {
+      const nextList = prev.aroma_tags ?? [];
+      const exists = nextList.includes(tag);
+      return {
+        ...prev,
+        aroma_tags: exists ? nextList.filter((item) => item !== tag) : [...nextList, tag]
       };
     });
   };
@@ -113,10 +170,40 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
     setSaving(true);
     try {
       await onSave(form);
-      setForm(makeDraft(form.bean_id, brewStyle));
+      setForm(makeDraft(form.bean_id, brewStyle, preferences.preferredGrinder));
     } finally {
       setSaving(false);
     }
+  };
+
+  const convertCToF = (value: number) => Math.round((value * 9) / 5 + 32);
+  const convertFToC = (value: number) => Math.round(((value - 32) * 5) / 9);
+
+  const waterTempDisplay = useMemo(() => {
+    const base = form.water_temp_c ?? 96;
+    return preferences.temperatureUnit === 'fahrenheit' ? convertCToF(base) : base;
+  }, [form.water_temp_c, preferences.temperatureUnit]);
+
+  const handleWaterTempChange = (rawValue: string) => {
+    if (rawValue === '') {
+      update('water_temp_c', undefined);
+      return;
+    }
+    const parsed = Number(rawValue);
+    if (Number.isNaN(parsed)) {
+      return;
+    }
+    const celsius = preferences.temperatureUnit === 'fahrenheit' ? convertFToC(parsed) : parsed;
+    update('water_temp_c', celsius);
+  };
+
+  const handleGrinderSelect = (value: string) => {
+    if (!value) {
+      update('grinder_name', undefined);
+      return;
+    }
+    setPreferredGrinder(value);
+    update('grinder_name', value);
   };
 
   return (
@@ -144,7 +231,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
         </div>
         <div className="flex items-center gap-3 text-sm">
           <label className="flex items-center gap-2 text-moss">
-            <input type="checkbox" checked={isAdvanced} onChange={(e) => setIsAdvanced(e.target.checked)} />
+            <input type="checkbox" checked={isAdvanced} onChange={(e) => handleAdvancedToggle(e.target.checked)} />
             Advanced mode
           </label>
           <a href="/brew" className="text-xs uppercase tracking-[0.3em] text-caramel">
@@ -153,7 +240,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
           <button
             type="button"
             className="text-caramel underline"
-            onClick={() => setForm(makeDraft(defaultBeanId, brewStyle))}
+            onClick={() => setForm(makeDraft(defaultBeanId, brewStyle, preferences.preferredGrinder))}
           >
             Reset
           </button>
@@ -207,25 +294,51 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs uppercase tracking-[0.3em] text-moss">Rating</span>
-            <input
-              type="range"
-              min={1}
-              max={10}
-              value={form.rating ?? 7}
-              onChange={(event) => update('rating', Number(event.target.value))}
-              className="accent-ember"
-            />
-            <span className="text-xs text-moss">{form.rating}</span>
-          </label>
+          <div className="flex flex-col gap-4 text-sm">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs uppercase tracking-[0.3em] text-moss">Overall rating</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={form.rating ?? 7}
+                onChange={(event) => update('rating', Number(event.target.value))}
+                className="accent-ember"
+              />
+              <span className="text-xs text-moss">{form.rating}</span>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs uppercase tracking-[0.3em] text-moss">Aroma</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={form.aroma_rating ?? 7}
+                onChange={(event) => update('aroma_rating', Number(event.target.value))}
+                className="accent-ember"
+              />
+              <span className="text-xs text-moss">{form.aroma_rating}</span>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs uppercase tracking-[0.3em] text-moss">Flavor</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={form.flavor_rating ?? 7}
+                onChange={(event) => update('flavor_rating', Number(event.target.value))}
+                className="accent-ember"
+              />
+              <span className="text-xs text-moss">{form.flavor_rating}</span>
+            </label>
+          </div>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Quick notes</span>
             <textarea
               value={form.quick_notes}
               onChange={(event) => update('quick_notes', event.target.value)}
               className="paper-lines rounded-lg border border-caramel/40 bg-transparent px-3 py-2 text-espresso"
-              rows={3}
+              rows={6}
             />
           </label>
         </div>
@@ -234,11 +347,13 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-4">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs uppercase tracking-[0.3em] text-moss">Water temp °C</span>
+                <span className="text-xs uppercase tracking-[0.3em] text-moss">
+                  Water temp °{preferences.temperatureUnit === 'fahrenheit' ? 'F' : 'C'}
+                </span>
                 <input
                   type="number"
-                  value={form.water_temp_c ?? 96}
-                  onChange={(event) => update('water_temp_c', Number(event.target.value))}
+                  value={waterTempDisplay}
+                  onChange={(event) => handleWaterTempChange(event.target.value)}
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
               </label>
@@ -246,7 +361,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                 <span className="text-xs uppercase tracking-[0.3em] text-moss">Bloom time (s)</span>
                 <input
                   type="number"
-                  value={form.bloom_time_s ?? 45}
+                  value={form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
                   onChange={(event) => update('bloom_time_s', Number(event.target.value))}
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
@@ -255,16 +370,32 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                 <span className="text-xs uppercase tracking-[0.3em] text-moss">Total brew time (s)</span>
                 <input
                   type="number"
-                  value={form.total_brew_time_s ?? 180}
+                  value={form.total_brew_time_s ?? DEFAULT_BREW_TIME}
                   onChange={(event) => update('total_brew_time_s', Number(event.target.value))}
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-xs uppercase tracking-[0.3em] text-moss">Grinder</span>
+                <select
+                  value={selectedGrinder}
+                  onChange={(event) => handleGrinderSelect(event.target.value)}
+                  className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
+                >
+                  <option value="">Select grinder</option>
+                  {grinderOptions.map((grinder) => (
+                    <option key={grinder} value={grinder}>
+                      {grinder}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
                 <input
                   type="text"
                   value={form.grind_setting ?? ''}
+                  placeholder="e.g., 18, 7.5, 24 clicks"
                   onChange={(event) => update('grind_setting', event.target.value)}
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
@@ -272,6 +403,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
             </div>
             <div className="space-y-4">
               <FlavorWheel selected={form.flavor_tags} onToggle={toggleTag} />
+              <AromaTags selected={form.aroma_tags ?? []} onToggle={toggleAromaTag} />
               <div className="rounded-2xl border border-caramel/40 bg-crema/80 p-4 text-espresso">
                 <div className="flex items-center justify-between">
                   <p className="text-xs uppercase tracking-[0.3em] text-moss">Agitation</p>
@@ -280,26 +412,38 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                   </button>
                 </div>
                 <div className="mt-3 space-y-2">
+                  {form.agitation_events.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 text-[10px] uppercase tracking-[0.2em] text-moss">
+                      <span>Time (s)</span>
+                      <span>Action</span>
+                      <span>Amount (g)</span>
+                    </div>
+                  )}
                   {form.agitation_events.map((event, index) => (
                     <div key={index} className="grid grid-cols-3 gap-2 text-sm">
                       <input
                         type="number"
-                        value={event.timestamp_s}
+                        value={event.timestamp_s ?? ''}
+                        placeholder="Time"
                         onChange={(e) => updateAgitation(index, 'timestamp_s', e.target.value)}
                         className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
+                        aria-label="Agitation time in seconds"
                       />
                       <input
                         type="text"
-                        value={event.action}
+                        value={event.action ?? ''}
+                        placeholder="Action (pour, stir)"
                         onChange={(e) => updateAgitation(index, 'action', e.target.value)}
                         className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
+                        aria-label="Agitation action"
                       />
                       <input
                         type="number"
                         value={event.amount_g ?? ''}
-                        placeholder="g"
+                        placeholder="Amount"
                         onChange={(e) => updateAgitation(index, 'amount_g', e.target.value)}
                         className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
+                        aria-label="Agitation amount in grams"
                       />
                     </div>
                   ))}

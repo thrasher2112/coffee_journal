@@ -1,18 +1,18 @@
-import { FlavorTag } from '../types';
+import { AromaTag } from '../types';
 
-const FLAVOR_TAGS: FlavorTag[] = ['Chocolatey', 'Nutty', 'Caramel', 'Fruity', 'Berry', 'Citrus', 'Floral', 'Spicy'];
+const AROMA_TAGS: AromaTag[] = ['Chocolate', 'Nutty', 'Caramel', 'Floral', 'Fruity', 'Spicy', 'Toasty', 'Earthy'];
 
 interface Props {
-  selected: FlavorTag[];
-  onToggle: (tag: FlavorTag) => void;
+  selected: AromaTag[];
+  onToggle: (tag: AromaTag) => void;
 }
 
-export function FlavorWheel({ selected, onToggle }: Props) {
+export function AromaTags({ selected, onToggle }: Props) {
   return (
     <div className="rounded-2xl border border-caramel/40 bg-crema/70 p-4 text-espresso">
-      <p className="text-xs uppercase tracking-[0.4em] text-moss">Flavor tags</p>
+      <p className="text-xs uppercase tracking-[0.4em] text-moss">Aroma tags</p>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {FLAVOR_TAGS.map((tag) => {
+        {AROMA_TAGS.map((tag) => {
           const active = selected.includes(tag);
           return (
             <button
@@ -20,9 +20,7 @@ export function FlavorWheel({ selected, onToggle }: Props) {
               type="button"
               onClick={() => onToggle(tag)}
               className={`rounded-full border px-3 py-1 text-xs uppercase tracking-wide transition-colors ${
-                active
-                  ? 'border-ember bg-ember/90 text-crema shadow-card'
-                  : 'border-caramel/60 bg-white/60 text-espresso'
+                active ? 'border-ember bg-ember/90 text-crema shadow-card' : 'border-caramel/60 bg-white/60 text-espresso'
               }`}
             >
               {tag}

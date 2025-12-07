@@ -28,12 +28,16 @@ class Brew(Base):
     brew_style: Mapped[Optional[str]] = mapped_column(String(50))
     grind_setting: Mapped[Optional[str]] = mapped_column(String(120))
     grind_setting_notes: Mapped[Optional[str]] = mapped_column(Text)
+    grinder_name: Mapped[Optional[str]] = mapped_column(String(120))
     water_temp_c: Mapped[Optional[int]] = mapped_column(Integer)
+    aroma_rating: Mapped[Optional[int]] = mapped_column(Integer)
+    flavor_rating: Mapped[Optional[int]] = mapped_column(Integer)
     bloom_time_s: Mapped[Optional[int]] = mapped_column(Integer)
     total_brew_time_s: Mapped[Optional[int]] = mapped_column(Integer)
     agitation_events: Mapped[Optional[Any]] = mapped_column(JSON)
     tasting_notes: Mapped[Optional[str]] = mapped_column(Text)
     flavor_tags: Mapped[Optional[Any]] = mapped_column(JSON)
+    aroma_tags: Mapped[Optional[Any]] = mapped_column(JSON)
     rating: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
