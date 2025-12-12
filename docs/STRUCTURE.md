@@ -15,7 +15,8 @@ This document explains how the stack is organized so contributors can quickly fi
 │   └── README.md             # backend runbook
 ├── frontend/                 # Vite + React PWA
 │   └── src/                  # pages, components, hooks, lib
-└── docs/STRUCTURE.md         # this file
+├── docs/STRUCTURE.md         # this file
+└── docs/HANDOFF.txt          # roadmap + readiness checklist
 ```
 
 ## Backend (FastAPI)
@@ -79,4 +80,4 @@ This document explains how the stack is organized so contributors can quickly fi
 - Frontend lacks automated tests; manual QA is still required.
 - Import/export needs stronger validation/pagination for large datasets.
 
-Refer back to `AGENTS.md` for contributor expectations and `coffee_journal/HANDOFF.txt` for roadmap context.
+Refer back to `AGENTS.md` for contributor expectations and `docs/HANDOFF.txt` for roadmap context, especially if you’re preparing the repo for a public GitHub release.

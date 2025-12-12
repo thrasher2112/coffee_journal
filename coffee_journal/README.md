@@ -22,11 +22,12 @@ Recent highlights:
 │   ├── src/coffee_journal/       # FastAPI app, routers, models, CRUD, scripts
 │   ├── tests/                    # pytest suites (SQLite)
 │   ├── alembic/                  # migrations
-│   ├── README.md                 # current file
-│   └── HANDOFF.txt               # status + roadmap
+│   └── README.md                 # current file
 ├── frontend/                     # Vite + React PWA
 │   └── src/{pages,components,...}
-└── docs/STRUCTURE.md             # architecture reference
+└── docs/                         # shared docs
+    ├── STRUCTURE.md              # architecture reference
+    └── HANDOFF.txt               # status + roadmap
 ```
 
 ## Getting started

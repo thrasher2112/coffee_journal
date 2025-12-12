@@ -82,4 +82,12 @@ make frontend-build   # npm run build
 - Frontend automated tests (React Testing Library)
 - Enhanced import/export validation and pagination
 
-For deeper details, see `coffee_journal/README.md`, `docs/STRUCTURE.md`, and `coffee_journal/HANDOFF.txt`.
+For deeper details, see `coffee_journal/README.md`, `docs/STRUCTURE.md`, and `docs/HANDOFF.txt`.
+
+## Publishing / GitHub Prep
+
+- Copy only safe config: keep `.env` files local (already `.gitignore`d) and verify no secrets are committed via `rg` or tools like `detect-secrets`.
+- Run regression commands (`make api-test`, `make frontend-build`) before pushing so CI starts green.
+- Review `docs/HANDOFF.txt` for outstanding production-readiness work (auth, multitenancy, ops) and convert items into issues if you’re opening the repo.
+- Licensing: the repo now ships with the MIT License (`LICENSE` at repo root). Update the copyright line if
+  you need to attribute a specific organization.
