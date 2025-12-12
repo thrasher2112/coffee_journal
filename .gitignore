@@ -22,3 +22,6 @@ coffee_journal/.env.*
 Thumbs.db
 .idea/
 .vscode/
+
+# Local docs
+docs/TO_DO.txt
