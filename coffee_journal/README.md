@@ -1,115 +1,93 @@
-# Coffee Journal
+# Coffee Journal Monorepo
 
-Coffee Journal is a Docker-first coffee logging stack composed of:
+This repository contains the full Coffee Journal stack:
 
-- **Backend** (`coffee_journal/src/coffee_journal`): FastAPI + SQLAlchemy 2.0 + Alembic, exposing beans/brews/metrics/sync routes.
-- **Frontend** (`frontend/`): React + Vite + Tailwind PWA with Quick Brew capture, Beans library, All Cups archive, and dashboards.
-- **PostgreSQL 16**: Primary datastore; migrations handled via Alembic.
+- **Backend** (`backend/`): FastAPI + SQLAlchemy 2.0 + Alembic, serving beans/brews/metrics/import-export APIs.
+- **Frontend** (`frontend/`): React + Vite + Tailwind PWA with Quick Brew logging, Beans library, All Cups archive, Best Cups, and Settings.
+- **Infrastructure**: Root `docker-compose.yml` to run Postgres, API, and Web, plus Makefile helpers.
 
-Recent highlights:
-- Quick Brew now tracks brew style (pour over, Aeropress, French press) with James Hoffmann ratio presets.
-- Beans library features search, date filters, edit/copy/delete actions, and usage insights (first/last brew, average rating, brew count).
-- “All Cups” page lists every brew (newest first) alongside the long‑running Best Cups hall of fame.
+## Quick Start
 
-## Repository layout
+```bash
+cp backend/.env.example backend/.env   # configure DB + URLs
+docker compose up --build              # boots db:5432, api:8000, web:3000
+```
 
+Visit:
+- Frontend: <http://localhost:3000>
+- API docs: <http://localhost:8000/docs>
+
+The API container automatically runs migrations (`alembic upgrade head`) and seeds demo beans/brews.
+
+## Repo Structure
 ```
 .
-├── docker-compose.yml            # db + api + web
-├── Makefile                      # helper targets (docker-up, migrate, seed, etc.)
-├── AGENTS.md                     # contributor guidelines
-├── coffee_journal/               # backend service (this directory)
-│   ├── src/coffee_journal/       # FastAPI app, routers, models, CRUD, scripts
-│   ├── tests/                    # pytest suites (SQLite)
-│   ├── alembic/                  # migrations
-│   └── README.md                 # current file
-├── frontend/                     # Vite + React PWA
-│   └── src/{pages,components,...}
-└── docs/                         # shared docs
-    ├── STRUCTURE.md              # architecture reference
-    └── HANDOFF.txt               # status + roadmap
+├── AGENTS.md                 # contributor guide
+├── README.md                 # (this file)
+├── backend/                  # FastAPI backend + Alembic + tests
+├── frontend/                 # React/Vite PWA
+├── docs/STRUCTURE.md         # architecture overview
+├── docker-compose.yml        # orchestrates db + api + web
+└── Makefile                  # docker-up/down, migrate, seed, etc.
 ```
 
-## Getting started
+## Common Tasks
 
-1. **Configure env vars**
-   ```bash
-   cd coffee_journal
-   cp .env.example .env
-   ```
-2. **Launch the stack**
-   ```bash
-   cd ..
-   docker compose up --build
-   ```
-   - API: <http://localhost:8000> (`/docs` for OpenAPI)
-   - Frontend: <http://localhost:3000>
-3. **Seed data** (optional if containers already seeded):
-   ```bash
-   cd coffee_journal
-   alembic upgrade head
-   python -m coffee_journal.scripts.seed_db
-   ```
-
-## Local development
-
-### Backend
+### Backend dev
 ```bash
-cd coffee_journal
+cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn coffee_journal.main:app --reload
+pytest          # backend tests (SQLite)
+alembic upgrade head
 ```
-- Tests (SQLite in-memory): `pytest`
-- Lint: `ruff check src`
-- Migrations: `alembic revision --autogenerate -m "..."` then `alembic upgrade head`
 
-### Frontend
+### Frontend dev
 ```bash
 cd frontend
 npm install
-npm run dev          # hot reload
-npm run build        # production bundle
+npm run dev      # hot reload
+npm run build    # production bundle
 ```
 
-## Feature tour
+### Seeds & migrations
+- Apply migrations manually: `cd backend && alembic upgrade head`
+- Seed demo data: `python -m coffee_journal.scripts.seed_db`
 
-- **Quick Brew bar** (Home):
-  - Pick a bean, enter dose/yield, choose a brew style, and log tasting notes.
-  - Ratio chips auto-adjust to the selected style (pour over, Aeropress, French press).
-  - Advanced mode captures water temp, bloom/total time, agitation events, grinder name + grind setting, and separate overall/aroma/flavor ratings with flavor/aroma tags.
-  - Measurement preferences (°C/°F) and grinder options are driven by user settings and stored in each brew (`grinder_name`, `aroma_rating`, `flavor_rating`, `aroma_tags`).
-- **Beans library**:
-  - Search by name/roaster/origin or filter by first/last brew dates.
-  - Toggle edit mode to update, copy, or delete beans.
-  - Each card displays first/last usage, brew count, and average rating (aggregated from brews).
-- **All Cups**:
-  - Chronological archive of every brew (newest first) powered by the `/api/brews` endpoint.
-- **Best Cups**:
-  - Spotlight on brews rated ≥ 8, sorted by score and recency.
-- **Settings**:
-  - Import/export, offline vault, and placeholder sync stubs (Google Drive integration TBD).
+### Useful Make targets
+```bash
+make docker-up        # docker compose up -d
+make docker-down      # docker compose down
+make migrate          # alembic upgrade head (inside backend)
+make seed             # run seed script
+make frontend-build   # npm run build
+```
 
-## API overview
+## Feature Highlights
+- Quick Brew now tracks brew style (pour over, Aeropress, French press) with Hoffmann ratios, per-style water/dose presets, grinder selection, and split sliders for overall/aroma/flavor scoring.
+- Advanced mode captures detailed brew data (water temp, bloom/total time, agitation timeline) with unit preferences (°C/°F) and default values that save automatically.
+- Beans library offers search, date filters, edit/copy/delete actions, usage metadata, plus average ratings fed by the richer brew logs.
+- All Cups lists every brew (newest first) while Best Cups spotlights ≥8 scores; Recent Brews cards render aroma tags, grinder details, and respect the chosen temperature unit.
+- Settings provides offline export/import, sync stubs, temperature-unit toggle, and full CRUD for personal grinder lists (used throughout Quick Brew).
 
-- `GET /api/beans`, `POST /api/beans`, `PUT/DELETE /api/beans/{id}`, `POST /api/beans/{id}/copy`
-- `GET/POST /api/brews`
-  - Brew payloads support `grinder_name`, `grind_setting`, `aroma_rating`, `flavor_rating`, and `aroma_tags` in addition to the existing fields.
-- `GET /api/metrics/overview` (top beans, recent brews, rating trend)
-- `GET /export`, `POST /import`, `POST /sync/google-drive`
-- `GET /health`
+## Testing Notes
+- Backend: `pytest` (SQLite). Keep regression coverage for beans/brews changes.
+- Frontend: manual smoke tests (Quick Brew logging, Beans filters/edit, All Cups ordering). Automated UI tests are a TODO.
+- CI tip: run `npm run build` before shipping to catch TypeScript or bundler errors.
 
-See `/docs` for the full OpenAPI schema.
+## Roadmap Snapshot
+- Authentication + multi-tenant safeguards
+- Drive sync implementation behind existing stub
+- Frontend automated tests (React Testing Library)
+- Enhanced import/export validation and pagination
 
-## Testing & QA
+For deeper details, see `backend/README.md`, `docs/STRUCTURE.md`, and `docs/HANDOFF.txt`.
 
-- Run `pytest` inside `coffee_journal/` for backend coverage (`tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py`).
-- Manual frontend smoke tests:
-  1. Log a Quick Brew with each style (toggle °C/°F) and verify ratio chips, grinder dropdown, and rating sliders.
-  2. Use Beans filters + edit mode actions (edit/copy/delete) and confirm counts update.
-  3. Visit All Cups + Best Cups to ensure ordering and rating thresholds look right, and verify Recent Brews shows aroma tags + grinder name.
-- `npm run build` catches TypeScript/ESLint issues during CI or pre-release builds.
+## Publishing / GitHub Prep
 
-## Style reference
-
-UI styling follows `coffee_journal/style_example.jpg` and `frontend/src/assets/style-guide.md`. Use Tailwind tokens present in `frontend/src/styles/variables.css` for colors and typography to maintain the café aesthetic.
+- Copy only safe config: keep `.env` files local (already `.gitignore`d) and verify no secrets are committed via `rg` or tools like `detect-secrets`.
+- Run regression commands (`make api-test`, `make frontend-build`) before pushing so CI starts green.
+- Review `docs/HANDOFF.txt` for outstanding production-readiness work (auth, multitenancy, ops) and convert items into issues if you’re opening the repo.
+- Licensing: the repo now ships with the MIT License (`LICENSE` at repo root). Update the copyright line if
+  you need to attribute a specific organization.

@@ -1,12 +1,12 @@
 # Repository Guidelines
 
-Coffee Journal ships as a FastAPI backend (`coffee_journal/`) and a Vite/React frontend (`frontend/`) orchestrated via the root `docker-compose.yml`. The stack exposes API port `8000` and web port `3000`.
+Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend (`frontend/`) orchestrated via the root `docker-compose.yml`. The stack exposes API port `8000` and web port `3000`.
 
 ## Project Structure
 ```
 .
 ├── AGENTS.md
-├── coffee_journal/          # FastAPI service, Alembic, tests, docs
+├── backend/                 # FastAPI service, Alembic, tests, docs
 │   ├── src/coffee_journal   # config, routers, CRUD, models, scripts
 │   ├── tests/               # pytest suites (SQLite in-memory)
 │   ├── alembic/             # migrations
@@ -19,22 +19,22 @@ Coffee Journal ships as a FastAPI backend (`coffee_journal/`) and a Vite/React f
 ```
 
 ## Development Workflow
-- Copy `coffee_journal/.env.example` to `.env`, then run `docker compose up --build` from repo root to start Postgres, API, and Web.
+- Copy `backend/.env.example` to `.env`, then run `docker compose up --build` from repo root to start Postgres, API, and Web.
 - Backend dev:
-  - `cd coffee_journal`
+  - `cd backend`
   - `python -m venv .venv && source .venv/bin/activate`
   - `pip install -r requirements.txt`
   - `uvicorn coffee_journal.main:app --reload`
 - Frontend dev:
   - `cd frontend && npm install`
   - `npm run dev`
-- Apply migrations with `cd coffee_journal && alembic upgrade head`. The API container also runs migrations + seeds automatically on boot.
+- Apply migrations with `cd backend && alembic upgrade head`. The API container also runs migrations + seeds automatically on boot.
 - Latest revisions (`20250220_03` and `20250220_04`) add aroma/flavor rating fields and `grinder_name`; run migrations after pulling to avoid column-missing errors.
 - Build static assets with `cd frontend && npm run build` (Compose does this during image build as well).
 
 ## Testing Guidelines
-- Backend tests live in `coffee_journal/tests`. Run `pytest` from `coffee_journal/` (SQLite in-memory DB). Keep regression coverage for new routers/CRUD helpers.
-- Linting: `ruff check coffee_journal/src`.
+- Backend tests live in `backend/tests`. Run `pytest` from `backend/` (SQLite in-memory DB). Keep regression coverage for new routers/CRUD helpers.
+- Linting: `ruff check backend/src`.
 - Frontend currently relies on manual/visual QA; add React Testing Library coverage when touching complex logic (QuickLog, Beans filters, All Cups sorting).
 
 ## Coding Standards
@@ -46,9 +46,9 @@ Coffee Journal ships as a FastAPI backend (`coffee_journal/`) and a Vite/React f
 ## Release & Ops Notes
 - `docker compose up --build` is the canonical way to boot prod parity locally.
 - Makefile shortcuts: `make docker-up`, `make docker-down`, `make migrate`, `make seed`, `make frontend-build`.
-- Seeds (`coffee_journal/src/coffee_journal/scripts/seed_db.py`) load demo beans/brews; rerun after dropping data to keep dashboards populated.
+- Seeds (`backend/src/coffee_journal/scripts/seed_db.py`) load demo beans/brews; rerun after dropping data to keep dashboards populated.
 
 ## Security & Configuration
 - Never commit `.env` files; secrets stay in local `.env` copies (ignored via `.gitignore`).
 - Postgres credentials default to `postgres/postgres`; adjust in `.env` for shared deployments.
-- When wiring new third-party services (Drive sync, auth), prototype inside containers before exposing credentials, and document required environment vars in `coffee_journal/.env.example`.
+- When wiring new third-party services (Drive sync, auth), prototype inside containers before exposing credentials, and document required environment vars in `backend/.env.example`.

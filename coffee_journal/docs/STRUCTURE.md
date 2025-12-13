@@ -8,7 +8,7 @@ This document explains how the stack is organized so contributors can quickly fi
 ├── docker-compose.yml        # orchestrates db, api, web
 ├── Makefile                  # helper commands (docker-up, migrate, seed, etc.)
 ├── AGENTS.md                 # contributor guide
-├── coffee_journal/           # FastAPI backend
+├── backend/                  # FastAPI backend
 │   ├── src/coffee_journal/   # application source
 │   ├── alembic/              # migrations
 │   ├── tests/                # pytest suites
@@ -20,7 +20,7 @@ This document explains how the stack is organized so contributors can quickly fi
 ```
 
 ## Backend (FastAPI)
-- **Entry point**: `coffee_journal/src/coffee_journal/main.py`
+- **Entry point**: `backend/src/coffee_journal/main.py`
   - Configures CORS, includes API router, exposes `/health`.
 - **Configuration**: `config.py` reads env vars (DB URL, API/front URLs, debug flag).
 - **Database**: `db.py` (SQLAlchemy engine/session). PostgreSQL in production; SQLite in tests.
@@ -58,7 +58,7 @@ This document explains how the stack is organized so contributors can quickly fi
   - Wraps fetch with JSON defaults. Provides helper functions for beans (with filters & copy), brews, metrics, import/export, sync.
 - **Styles**:
   - Tailwind config + CSS variables under `frontend/src/styles`.
-  - Style guide reference: `frontend/src/assets/style-guide.md`, plus `coffee_journal/style_example.jpg`.
+  - Style guide reference: `frontend/src/assets/style-guide.md`, plus `backend/style_example.jpg`.
 
 ## Data Flow
 1. **User logs a brew** via Quick Log → `createBrew` -> `/api/brews/` → DB. Metrics endpoint reflects updated rating trends/top beans.

@@ -1,6 +1,6 @@
 # Coffee Journal Style Guide
 
-_Source reference_: `codex/coffee_journal/style_example.jpg` (dark café table + tasting notebook).
+_Source reference_: `backend/style_example.jpg` (dark café table + tasting notebook).
 
 ## Palette
 - **Night Roast** `#1B1614` — primary background / full-bleed sections

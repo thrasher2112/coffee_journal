@@ -1,21 +1,27 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-.env
-.venv/
-*.sqlite3
-
-# Distribution / packaging
-build/
-dist/
 *.egg-info/
+.pytest_cache/
+.coverage
+backend/.venv/
+backend/.mypy_cache/
 
-# VSCode / IDE
-.vscode/
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment files
+.env
+backend/.env
+backend/.env.*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
 .idea/
+.vscode/
 
-# Containers & data
-postgres_data/
+# Local docs
+docs/TO_DO.txt
