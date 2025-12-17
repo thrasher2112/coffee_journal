@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 *.so
 .env
+!.env.example
 .venv/
 *.sqlite3
 
