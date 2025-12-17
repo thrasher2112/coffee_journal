@@ -24,7 +24,6 @@ class Bean(Base):
     origin: Mapped[Optional[str]] = mapped_column(String(255))
     process: Mapped[Optional[str]] = mapped_column(String(120))
     roast_level: Mapped[Optional[str]] = mapped_column(String(120))
-    elevation_m: Mapped[Optional[int]] = mapped_column()
     notes: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

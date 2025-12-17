@@ -77,24 +77,3 @@ def test_copy_bean(client):
     duplicated = copy_resp.json()
     assert duplicated["name"].startswith(payload["name"])
     assert duplicated["id"] != bean_id
-
-
-def test_create_bean_with_elevation(client):
-    payload = {
-        "name": "Sidama Natural",
-        "origin": "Ethiopia",
-        "process": "Natural",
-        "elevation_m": 2150,
-    }
-    response = client.post("/api/beans/", json=payload)
-    assert response.status_code == 201
-    data = response.json()
-    assert data["elevation_m"] == 2150
-
-
-def test_create_bean_without_elevation(client):
-    payload = {"name": "Mystery Origin"}
-    response = client.post("/api/beans/", json=payload)
-    assert response.status_code == 201
-    data = response.json()
-    assert data["elevation_m"] is None
