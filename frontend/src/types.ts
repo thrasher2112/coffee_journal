@@ -25,6 +25,7 @@ export interface Bean {
   origin?: string;
   process?: string;
   roast_level?: string;
+  elevation_m?: number | null;
   notes?: string;
   created_at: string;
   updated_at: string;

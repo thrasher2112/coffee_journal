@@ -3,7 +3,7 @@ import type { Bean } from '../types';
 import { copyBean, createBean, deleteBean, fetchBeans, updateBean } from '../lib/api';
 import { SAMPLE_BEANS } from '../lib/sampleData';
 
-const emptyForm = { name: '', roaster: '', origin: '', process: '', roast_level: '' };
+const emptyForm = { name: '', roaster: '', origin: '', process: '', roast_level: '', elevation_m: '' };
 const defaultFilters = { q: '', firstUsedAfter: '', lastUsedBefore: '' };
 
 function formatDate(value?: string | null) {
@@ -58,7 +58,10 @@ export function BeansPage() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const payload = { ...form };
+    const payload = {
+      ...form,
+      elevation_m: form.elevation_m ? Number(form.elevation_m) : null
+    };
     try {
       if (editingId) {
         await updateBean(editingId, payload);
@@ -80,7 +83,8 @@ export function BeansPage() {
       roaster: bean.roaster || '',
       origin: bean.origin || '',
       process: bean.process || '',
-      roast_level: bean.roast_level || ''
+      roast_level: bean.roast_level || '',
+      elevation_m: bean.elevation_m?.toString() || ''
     });
   };
 
@@ -239,10 +243,11 @@ export function BeansPage() {
                 <p>
                   Avg rating: {formatAverage(bean.avg_rating)} · Brews: {bean.brew_count ?? 0}
                 </p>
-                {(bean.process || bean.roast_level) && (
+                {(bean.process || bean.roast_level || bean.elevation_m) && (
                   <p>
                     {bean.process && <span className="mr-2 uppercase tracking-[0.2em]">{bean.process}</span>}
-                    {bean.roast_level && <span className="uppercase tracking-[0.2em]">{bean.roast_level}</span>}
+                    {bean.roast_level && <span className="mr-2 uppercase tracking-[0.2em]">{bean.roast_level}</span>}
+                    {bean.elevation_m && <span className="uppercase tracking-[0.2em]">{bean.elevation_m}m</span>}
                   </p>
                 )}
               </div>

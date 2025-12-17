@@ -13,6 +13,7 @@ class BeanBase(BaseModel):
     origin: Optional[str] = Field(None, max_length=255)
     process: Optional[str] = Field(None, max_length=120)
     roast_level: Optional[str] = Field(None, max_length=120)
+    elevation_m: Optional[int] = Field(None)
     notes: Optional[str] = Field(None)
 
 
@@ -26,6 +27,7 @@ class BeanUpdate(BaseModel):
     origin: Optional[str] = Field(None, max_length=255)
     process: Optional[str] = Field(None, max_length=120)
     roast_level: Optional[str] = Field(None, max_length=120)
+    elevation_m: Optional[int] = Field(None)
     notes: Optional[str] = Field(None)
 
 
