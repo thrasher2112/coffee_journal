@@ -1,11 +1,23 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.so
 *.egg-info/
 .pytest_cache/
 .coverage
+.venv/
 backend/.venv/
 backend/.mypy_cache/
+
+# Build artifacts
+build/
+dist/
+
+# Database / data files
+*.sqlite3
+backend/postgres_data/
 
 # Node / frontend
 frontend/node_modules/
@@ -14,8 +26,10 @@ frontend/.vite/
 
 # Environment files
 .env
+.env.*
 backend/.env
 backend/.env.*
+!backend/.env.example
 
 # Editor / OS
 .DS_Store
