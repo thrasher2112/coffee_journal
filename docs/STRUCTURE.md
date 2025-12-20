@@ -36,7 +36,7 @@ This document explains how the stack is organized so contributors can quickly fi
   - `metrics.py`: top beans, recent brews, rating trends.
   - `data.py`: import/export/sync stubs.
 - **Scripts**: `scripts/seed_db.py` loads demo beans + brews (used on container start).
-- **Migrations**: Alembic revisions live under `alembic/versions`. Latest revisions add brew style plus aroma/grinder fields (`20250220_03`, `20250220_04`); run `alembic upgrade head` after pulling.
+- **Migrations**: Alembic revisions live under `alembic/versions`. Latest revisions add brew style plus aroma/grinder fields (`20250220_03`, `20250220_04`) and bean elevation (`20251216_05`); run `alembic upgrade head` after pulling.
 - **Tests**: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` use SQLite in-memory fixtures defined in `tests/conftest.py`.
 
 ## Frontend (React + Vite + Tailwind)
@@ -67,7 +67,7 @@ This document explains how the stack is organized so contributors can quickly fi
 4. **Metrics** fetch `/api/metrics/overview` for charts (rating trend, top beans, recent brews).
 
 ## Environments & Commands
-- **Everything at once**: `docker compose up --build`
+- **Everything at once**: `docker compose up --build` (db exposed on host port 5555)
 - **Backend dev**: `uvicorn coffee_journal.main:app --reload`
 - **Frontend dev**: `npm run dev` (port 5173 by default)
 - **Tests**: `cd coffee_journal && pytest`

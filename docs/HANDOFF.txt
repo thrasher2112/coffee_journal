@@ -2,8 +2,8 @@ Coffee Journal Handoff Summary
 ------------------------------
 
 Current Repository State
-- Root `docker-compose.yml` orchestrates Postgres 16 (`db`), FastAPI (`api` + Alembic + seed runner), and the React/Tailwind PWA (`web`). `docker compose up --build` from repo root boots the full stack (API :8000, frontend :3000).
-- Backend (`backend/src/coffee_journal`) now exposes enriched bean metadata (first/last brew dates, average rating, brew counts) plus brew-style-aware logging. Routers cover beans/brews/metrics/import/export/sync, with Alembic migrations (latest add aroma/flavor ratings, grinder names, and brew_style columns).
+- Root `docker-compose.yml` orchestrates Postgres 16 (`db`), FastAPI (`api` + Alembic + seed runner), and the React/Tailwind PWA (`web`). `docker compose up --build` from repo root boots the full stack (API :8000, frontend :3000, Postgres host port :5555 → container :5432).
+- Backend (`backend/src/coffee_journal`) now exposes enriched bean metadata (first/last brew dates, average rating, brew counts, elevation) plus brew-style-aware logging. Routers cover beans/brews/metrics/import/export/sync, with Alembic migrations (latest add aroma/flavor ratings, grinder names, brew_style columns, and bean elevation `20251216_05`).
 - Tests: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` run via `pytest` (SQLite in-memory). Ruff is configured via `pyproject.toml`.
 - Frontend (`frontend/`) includes Quick Brew with style presets, grinder dropdown, °C/°F-aware temperature inputs, advanced agitation builder, aroma/flavor sliders & tags, an enhanced Beans library (search, filters, edit/copy/delete), Best Cups, the All Cups archive, and Settings with measurement + grinder management alongside offline/export tools.
 - Documentation: updated `AGENTS.md`, `backend/README.md`, and `docs/STRUCTURE.md` cover contributor workflow, runbooks, and architecture.
@@ -17,6 +17,7 @@ GitHub Publishing Checklist
 Infrastructure & Commands
 - `.env.example` (copy to `.env`) defines DB creds plus `API_URL`/`FRONTEND_URL`/`VITE_API_URL`. Compose + Makefiles read it automatically.
 - Make targets (repo root `Makefile`): `docker-up`, `docker-down`, `migrate`, `seed`, `frontend-build`, `api-test`. API-specific commands also live in `backend/Makefile`.
+- Postgres maps to host port 5555 by default (container 5432) to avoid local collisions.
 - Backend container entrypoint runs `alembic upgrade head` + `python -m coffee_journal.scripts.seed_db` before launching uvicorn. Frontend container builds `npm run build` output and serves via `serve -s dist -l 3000`.
 - Manual commands:
   - Backend dev: `cd backend && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`

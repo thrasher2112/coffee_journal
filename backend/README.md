@@ -8,7 +8,7 @@ Coffee Journal is a Docker-first coffee logging stack composed of:
 
 Recent highlights:
 - Quick Brew now tracks brew style (pour over, Aeropress, French press) with James Hoffmann ratio presets.
-- Beans library features search, date filters, edit/copy/delete actions, and usage insights (first/last brew, average rating, brew count).
+- Beans library features search, date filters, elevation (m), edit/copy/delete actions, and usage insights (first/last brew, average rating, brew count).
 - “All Cups” page lists every brew (newest first) alongside the long‑running Best Cups hall of fame.
 
 ## Repository layout
@@ -44,6 +44,7 @@ Recent highlights:
    ```
    - API: <http://localhost:8000> (`/docs` for OpenAPI)
    - Frontend: <http://localhost:3000>
+   - Postgres (host): <http://localhost:5555> (for psql/GUI; container port remains 5432)
 3. **Seed data** (optional if containers already seeded):
    ```bash
    cd backend
@@ -93,6 +94,7 @@ npm run build        # production bundle
 ## API overview
 
 - `GET /api/beans`, `POST /api/beans`, `PUT/DELETE /api/beans/{id}`, `POST /api/beans/{id}/copy`
+  - Bean payloads optionally include `elevation_m` (meters above sea level).
 - `GET/POST /api/brews`
   - Brew payloads support `grinder_name`, `grind_setting`, `aroma_rating`, `flavor_rating`, and `aroma_tags` in addition to the existing fields.
 - `GET /api/metrics/overview` (top beans, recent brews, rating trend)

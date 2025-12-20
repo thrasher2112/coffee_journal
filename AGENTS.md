@@ -29,7 +29,7 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
   - `cd frontend && npm install`
   - `npm run dev`
 - Apply migrations with `cd backend && alembic upgrade head`. The API container also runs migrations + seeds automatically on boot.
-- Latest revisions (`20250220_03` and `20250220_04`) add aroma/flavor rating fields and `grinder_name`; run migrations after pulling to avoid column-missing errors.
+- Latest revisions (`20250220_03` and `20250220_04`) add aroma/flavor rating fields and `grinder_name`; `20251216_05` adds bean `elevation_m`. Run migrations after pulling to avoid column-missing errors.
 - Build static assets with `cd frontend && npm run build` (Compose does this during image build as well).
 
 ## Testing Guidelines
@@ -44,7 +44,7 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
 - When touching brew payloads, keep the new `grinder_name`, `aroma_rating`, `flavor_rating`, and `aroma_tags` fields wired through schemas, tests, and UI.
 
 ## Release & Ops Notes
-- `docker compose up --build` is the canonical way to boot prod parity locally.
+- `docker compose up --build` is the canonical way to boot prod parity locally. Postgres maps to host port `5555` by default (container 5432).
 - Makefile shortcuts: `make docker-up`, `make docker-down`, `make migrate`, `make seed`, `make frontend-build`.
 - Seeds (`backend/src/coffee_journal/scripts/seed_db.py`) load demo beans/brews; rerun after dropping data to keep dashboards populated.
 
