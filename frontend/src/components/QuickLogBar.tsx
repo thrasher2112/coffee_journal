@@ -4,6 +4,7 @@ import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
 import { AromaTags } from './AromaTags';
 import { usePreferences } from '../contexts/PreferencesContext';
+import type { TemperatureUnit } from '../contexts/PreferencesContext';
 
 interface Props {
   beans: Bean[];
@@ -31,8 +32,15 @@ const DEFAULT_BLOOM_TIME = 45;
 const DEFAULT_BREW_TIME = 180;
 
 type BrewStyle = keyof typeof BREW_STYLE_PRESETS;
+type DraftForm = BrewDraft & {
+  bean_weight_g: number | '';
+  water_weight_g: number | '';
+  water_temp_c?: number | '';
+  bloom_time_s?: number | '';
+  total_brew_time_s?: number | '';
+};
 
-const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?: string): BrewDraft => ({
+const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?: string): DraftForm => ({
   bean_id: beanId,
   bean_weight_g: 18,
   water_weight_g: 288,
@@ -49,21 +57,32 @@ const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?
   grind_setting: ''
 });
 
-const withAdvancedDefaults = (draft: BrewDraft): BrewDraft => ({
+const withAdvancedDefaults = (draft: DraftForm): DraftForm => ({
   ...draft,
   water_temp_c: draft.water_temp_c ?? DEFAULT_WATER_TEMP,
   bloom_time_s: draft.bloom_time_s ?? DEFAULT_BLOOM_TIME,
   total_brew_time_s: draft.total_brew_time_s ?? DEFAULT_BREW_TIME
 });
 
+const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
+  if (celsius === '' || celsius === undefined) return '';
+  if (typeof celsius !== 'number' || Number.isNaN(celsius)) return '';
+  return unit === 'fahrenheit' ? Math.round((celsius * 9) / 5 + 32).toString() : celsius.toString();
+};
+
 export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
   const { preferences, setPreferredGrinder } = usePreferences();
   const [isAdvanced, setIsAdvanced] = useState(false);
   const [brewStyle, setBrewStyle] = useState<BrewStyle>('pour-over');
-  const [form, setForm] = useState<BrewDraft>(() =>
+  const [form, setForm] = useState<DraftForm>(() =>
     makeDraft(defaultBeanId, 'pour-over', preferences.preferredGrinder)
   );
+  const [waterTempInput, setWaterTempInput] = useState<string>('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setWaterTempInput(toDisplayTemp(form.water_temp_c, preferences.temperatureUnit));
+  }, [preferences.temperatureUnit]);
 
   useEffect(() => {
     if (!defaultBeanId) return;
@@ -109,17 +128,26 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
   const handleAdvancedToggle = (checked: boolean) => {
     setIsAdvanced(checked);
     if (checked) {
-      setForm((prev) => withAdvancedDefaults(prev));
+      setForm((prev) => {
+        const next = withAdvancedDefaults(prev);
+        setWaterTempInput(toDisplayTemp(next.water_temp_c, preferences.temperatureUnit));
+        return next;
+      });
     }
   };
 
-  const ratio = useMemo(() => form.water_weight_g / form.bean_weight_g || 0, [form]);
+  const beanWeight = typeof form.bean_weight_g === 'number' ? form.bean_weight_g : NaN;
+  const waterWeight = typeof form.water_weight_g === 'number' ? form.water_weight_g : NaN;
+  const ratio = useMemo(() => {
+    if (!Number.isFinite(beanWeight) || beanWeight === 0 || !Number.isFinite(waterWeight)) return undefined;
+    return waterWeight / beanWeight;
+  }, [beanWeight, waterWeight]);
   const stylePresets = BREW_STYLE_PRESETS[brewStyle];
   const grinderOptions = preferences.grinders;
   const selectedGrinder =
     form.grinder_name && grinderOptions.includes(form.grinder_name) ? form.grinder_name : '';
 
-  const update = <K extends keyof BrewDraft>(key: K, value: BrewDraft[K]) => {
+  const update = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -167,10 +195,26 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
       alert('Select a bean to log a brew.');
       return;
     }
+    if (typeof form.bean_weight_g !== 'number' || typeof form.water_weight_g !== 'number') {
+      alert('Enter dose and yield before saving.');
+      return;
+    }
     setSaving(true);
     try {
-      await onSave(form);
-      setForm(makeDraft(form.bean_id, brewStyle, preferences.preferredGrinder));
+      const payload: BrewDraft = {
+        ...form,
+        bean_weight_g: form.bean_weight_g,
+        water_weight_g: form.water_weight_g,
+        water_temp_c: form.water_temp_c === '' ? undefined : form.water_temp_c,
+        bloom_time_s: form.bloom_time_s === '' ? undefined : form.bloom_time_s,
+        total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s
+      };
+      await onSave(payload);
+      setForm(() => {
+        const draft = makeDraft(form.bean_id, brewStyle, preferences.preferredGrinder);
+        setWaterTempInput('');
+        return draft;
+      });
     } finally {
       setSaving(false);
     }
@@ -179,12 +223,8 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
   const convertCToF = (value: number) => Math.round((value * 9) / 5 + 32);
   const convertFToC = (value: number) => Math.round(((value - 32) * 5) / 9);
 
-  const waterTempDisplay = useMemo(() => {
-    const base = form.water_temp_c ?? 96;
-    return preferences.temperatureUnit === 'fahrenheit' ? convertCToF(base) : base;
-  }, [form.water_temp_c, preferences.temperatureUnit]);
-
   const handleWaterTempChange = (rawValue: string) => {
+    setWaterTempInput(rawValue);
     if (rawValue === '') {
       update('water_temp_c', undefined);
       return;
@@ -256,8 +296,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
               type="number"
               min={5}
               step={0.5}
-              value={form.bean_weight_g}
-              onChange={(event) => update('bean_weight_g', Number(event.target.value))}
+              value={form.bean_weight_g === '' ? '' : form.bean_weight_g}
+              onChange={(event) =>
+                update('bean_weight_g', event.target.value === '' ? '' : Number(event.target.value))
+              }
               className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
             />
           </label>
@@ -267,8 +309,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
               type="number"
               min={50}
               step={1}
-              value={form.water_weight_g}
-              onChange={(event) => update('water_weight_g', Number(event.target.value))}
+              value={form.water_weight_g === '' ? '' : form.water_weight_g}
+              onChange={(event) =>
+                update('water_weight_g', event.target.value === '' ? '' : Number(event.target.value))
+              }
               className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
             />
           </label>
@@ -277,12 +321,19 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
         <div className="flex flex-wrap items-center gap-4 text-sm text-moss">
           <span>Ratio: {ratio ? ratio.toFixed(1) : '—'}</span>
           {stylePresets.ratios.map((value) => {
-            const isActive = Math.abs(ratio - value) < 0.1;
+            const isActive = ratio ? Math.abs(ratio - value) < 0.1 : false;
             return (
               <button
                 key={value}
                 type="button"
-                onClick={() => update('water_weight_g', Number((form.bean_weight_g * value).toFixed(1)))}
+                onClick={() =>
+                  update(
+                    'water_weight_g',
+                    typeof form.bean_weight_g === 'number'
+                      ? Number((form.bean_weight_g * value).toFixed(1))
+                      : form.water_weight_g
+                  )
+                }
                 className={`rounded-full border px-3 py-1 text-xs uppercase tracking-wide ${
                   isActive ? 'border-ember bg-ember/90 text-crema' : 'border-caramel/40 text-espresso'
                 }`}
@@ -352,7 +403,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                 </span>
                 <input
                   type="number"
-                  value={waterTempDisplay}
+                  min={preferences.temperatureUnit === 'fahrenheit' ? 120 : 50}
+                  max={preferences.temperatureUnit === 'fahrenheit' ? 212 : 100}
+                  value={waterTempInput}
                   onChange={(event) => handleWaterTempChange(event.target.value)}
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
@@ -361,8 +414,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                 <span className="text-xs uppercase tracking-[0.3em] text-moss">Bloom time (s)</span>
                 <input
                   type="number"
-                  value={form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
-                  onChange={(event) => update('bloom_time_s', Number(event.target.value))}
+                  value={form.bloom_time_s === '' ? '' : form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
+                  onChange={(event) =>
+                    update('bloom_time_s', event.target.value === '' ? '' : Number(event.target.value))
+                  }
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
               </label>
@@ -370,8 +425,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                 <span className="text-xs uppercase tracking-[0.3em] text-moss">Total brew time (s)</span>
                 <input
                   type="number"
-                  value={form.total_brew_time_s ?? DEFAULT_BREW_TIME}
-                  onChange={(event) => update('total_brew_time_s', Number(event.target.value))}
+                  value={form.total_brew_time_s === '' ? '' : form.total_brew_time_s ?? DEFAULT_BREW_TIME}
+                  onChange={(event) =>
+                    update('total_brew_time_s', event.target.value === '' ? '' : Number(event.target.value))
+                  }
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
               </label>
