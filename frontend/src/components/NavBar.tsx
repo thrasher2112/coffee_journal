@@ -32,12 +32,9 @@ export function NavBar() {
             </NavLink>
           ))}
         </nav>
-        <a
-          href="#quick-log"
-          className="rounded-full bg-caramel px-4 py-2 text-espresso text-sm font-semibold shadow-card"
-        >
-          Quick Log
-        </a>
+        <Link to="/brew" className="rounded-full bg-caramel px-4 py-2 text-espresso text-sm font-semibold shadow-card">
+          Log a Brew
+        </Link>
       </div>
     </header>
   );

@@ -1,21 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Chart, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler } from 'chart.js';
-import { Line, Bar } from 'react-chartjs-2';
-import { QuickLogBar } from '../components/QuickLogBar';
+import { useNavigate } from 'react-router-dom';
+import {
+  Chart,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Tooltip,
+  Legend,
+  Filler,
+  ArcElement
+} from 'chart.js';
+import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import { BrewCard } from '../components/BrewCard';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
-import type { Bean, Brew, MetricsOverview, BrewDraft } from '../types';
-import { createBrew, fetchBeans, fetchBrews, fetchMetrics } from '../lib/api';
+import type { Bean, Brew, MetricsOverview } from '../types';
+import { fetchBeans, fetchBrews, fetchMetrics } from '../lib/api';
 import { SAMPLE_BEANS, SAMPLE_BREWS, SAMPLE_METRICS } from '../lib/sampleData';
 
-Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler);
+Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler);
 
 export function HomePage() {
+  const navigate = useNavigate();
   const [beans, setBeans] = useState<Bean[]>([]);
   const [brews, setBrews] = useState<Brew[]>([]);
   const [metrics, setMetrics] = useState<MetricsOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { brews: localBrews, addBrew, unsynced } = useLocalBrewStore();
+  const { brews: localBrews, unsynced } = useLocalBrewStore();
 
   const load = async () => {
     try {
@@ -36,16 +48,6 @@ export function HomePage() {
   useEffect(() => {
     load();
   }, []);
-
-  const handleSave = async (draft: BrewDraft) => {
-    try {
-      await createBrew(draft);
-      await load();
-    } catch (err) {
-      console.warn('Saving locally', err);
-      addBrew(draft);
-    }
-  };
 
   const allBrews = useMemo(() => {
     const remote = brews;
@@ -73,8 +75,23 @@ export function HomePage() {
       updated_at: brew.created_at,
       ratio: Number((brew.water_weight_g / brew.bean_weight_g).toFixed(1))
     })) as Brew[];
-    return [...local, ...remote];
+    return [...local, ...remote].sort(
+      (a, b) => new Date(b.date ?? b.created_at ?? 0).getTime() - new Date(a.date ?? a.created_at ?? 0).getTime()
+    );
   }, [brews, localBrews, beans]);
+
+  const lastBrew = allBrews[0];
+
+  const styleDistribution = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allBrews.forEach((brew) => {
+      const style = brew.brew_style || 'Unknown';
+      counts[style] = (counts[style] || 0) + 1;
+    });
+    const labels = Object.keys(counts);
+    const data = labels.map((label) => counts[label]);
+    return { labels, data };
+  }, [allBrews]);
 
   const sortedTrendData = useMemo(() => {
     if (!metrics?.rating_trends) return [];
@@ -111,13 +128,61 @@ export function HomePage() {
       .sort((a, b) => a.sortValue - b.sortValue);
   }, [metrics]);
 
+  const handleLogClick = () => navigate('/brew');
+  const handleRepeatLast = () => {
+    if (!lastBrew) {
+      navigate('/brew');
+      return;
+    }
+    navigate('/brew', { state: { prefill: lastBrew } });
+  };
+
   return (
     <div className="space-y-8">
       {error && <div className="rounded-2xl border border-ember/50 bg-ember/20 p-3 text-sm text-crema">{error}</div>}
-      <QuickLogBar beans={beans} onSave={handleSave} defaultBeanId={beans[0]?.id} />
 
-      <section className="grid gap-6 md:grid-cols-2">
-        <article className="journal-card p-6">
+      <section className="journal-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.4em] text-moss">Today at a glance</p>
+            <h2 className="text-3xl font-display text-espresso">Dashboard</h2>
+            {lastBrew ? (
+              <div className="mt-3 text-sm text-moss space-y-1">
+                <p>
+                  Last brew: <span className="text-espresso font-semibold">{lastBrew.bean_name ?? 'Unknown bean'}</span>{' '}
+                  · {lastBrew.brew_style ?? 'Style TBD'} · ratio {lastBrew.ratio ?? '—'} · rating{' '}
+                  {lastBrew.rating ?? '—'}
+                </p>
+                <p className="text-xs uppercase tracking-[0.2em] text-moss">
+                  {lastBrew.date || lastBrew.created_at}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-moss">No brews yet — log your first one to get insights.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <button className="rounded-full bg-ember px-4 py-2 text-crema shadow-card" onClick={handleLogClick}>
+              Log a Brew
+            </button>
+            <button
+              className="rounded-full border border-caramel/50 px-4 py-2 text-espresso"
+              onClick={handleRepeatLast}
+              disabled={!lastBrew}
+            >
+              Repeat last brew
+            </button>
+            {unsynced.length > 0 && (
+              <span className="rounded-full border border-caramel/50 px-3 py-1 text-xs text-caramel">
+                {unsynced.length} draft{unsynced.length === 1 ? '' : 's'} offline
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 md:grid-cols-3">
+        <article className="journal-card p-6 md:col-span-2">
           <h3 className="text-xl font-display text-espresso">Rating trend</h3>
           {sortedTrendData.length ? (
             <Line
@@ -141,6 +206,29 @@ export function HomePage() {
           )}
         </article>
         <article className="journal-card p-6">
+          <h3 className="text-xl font-display text-espresso">Brew styles</h3>
+          {styleDistribution.labels.length ? (
+            <Doughnut
+              data={{
+                labels: styleDistribution.labels,
+                datasets: [
+                  {
+                    label: 'Brews',
+                    data: styleDistribution.data,
+                    backgroundColor: ['#C89C73', '#A8563C', '#3B2924', '#56645D', '#F8F1E8']
+                  }
+                ]
+              }}
+              options={{ plugins: { legend: { position: 'bottom' } } }}
+            />
+          ) : (
+            <p className="text-sm text-moss">Log a brew to see distribution.</p>
+          )}
+        </article>
+      </section>
+
+      <section className="grid gap-6 md:grid-cols-2">
+        <article className="journal-card p-6">
           <h3 className="text-xl font-display text-espresso">Top beans</h3>
           {metrics ? (
             <Bar
@@ -160,11 +248,31 @@ export function HomePage() {
             <p className="text-sm text-moss">No beans logged yet.</p>
           )}
         </article>
+        <article className="journal-card p-6">
+          <h3 className="text-xl font-display text-espresso">Recent brews</h3>
+          <div className="mt-3 grid gap-3">
+            {allBrews.slice(0, 3).map((brew) => (
+              <div key={brew.id} className="flex items-center justify-between rounded-xl border border-caramel/30 bg-crema/70 p-3">
+                <div>
+                  <p className="text-sm font-display text-espresso">{brew.bean_name ?? 'Unknown bean'}</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-moss">
+                    {brew.brew_style ?? 'Style'} · ratio {brew.ratio ?? '—'}
+                  </p>
+                </div>
+                <div className="text-right text-sm text-moss">
+                  <p className="text-ember text-lg font-display">{brew.rating ?? '—'}</p>
+                  <p className="text-xs">{brew.date || brew.created_at}</p>
+                </div>
+              </div>
+            ))}
+            {!allBrews.length && <p className="text-sm text-moss">No brews logged yet.</p>}
+          </div>
+        </article>
       </section>
 
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-2xl font-display">Recent brews</h3>
+          <h3 className="text-2xl font-display">All recent cups</h3>
           {unsynced.length > 0 && <span className="text-sm text-caramel">{unsynced.length} pending sync</span>}
         </div>
         <div className="grid gap-6 md:grid-cols-2">

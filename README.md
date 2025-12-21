@@ -65,8 +65,9 @@ make frontend-build   # npm run build
 ```
 
 ## Feature Highlights
-- Quick Brew now tracks brew style (pour over, Aeropress, French press) with Hoffmann ratios, per-style water/dose presets, grinder selection, and split sliders for overall/aroma/flavor scoring.
-- Advanced mode captures detailed brew data (water temp, bloom/total time, agitation timeline) with unit preferences (°C/°F) and default values that save automatically.
+- Home is a dashboard (glance + charts); logging lives on the dedicated “Log a Brew” page with Quick/Advanced tabs sharing one form state.
+- Quick Brew tracks brew style (pour over, Aeropress, French press) with Hoffmann ratios, per-style water/dose presets, grinder selection, and split sliders for overall/aroma/flavor scoring.
+- Advanced Brew captures detailed brew data (water temp, bloom/total time, agitation timeline, aroma/flavor tags) with unit preferences (°C/°F) and blank-safe inputs.
 - Beans library offers search, date filters, elevation (m), edit/copy/delete actions, usage metadata, plus average ratings fed by the richer brew logs.
 - All Cups lists every brew (newest first) while Best Cups spotlights ≥8 scores; Recent Brews cards render aroma tags, grinder details, and respect the chosen temperature unit.
 - Settings provides offline export/import, sync stubs, temperature-unit toggle, and full CRUD for personal grinder lists (used throughout Quick Brew).
