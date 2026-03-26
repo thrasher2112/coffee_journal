@@ -31,6 +31,10 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 
+# Devenv
+.devenv/
+.devenv.flake.nix
+
 # Editor / OS
 .DS_Store
 Thumbs.db

@@ -6,11 +6,17 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      __API_URL__: JSON.stringify(env.VITE_API_URL || 'http://localhost:8000')
+      __API_URL__: JSON.stringify(env.VITE_API_URL ?? 'http://localhost:8000')
     },
     server: {
       port: 5173,
-      host: true
+      host: true,
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true
+        }
+      }
     }
   };
 });

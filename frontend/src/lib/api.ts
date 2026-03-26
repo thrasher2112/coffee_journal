@@ -1,6 +1,6 @@
 import type { Bean, Brew, BrewDraft, MetricsOverview, User } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || (globalThis as any).__API_URL__ || 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL ?? (globalThis as any).__API_URL__ ?? 'http://localhost:8000';
 
 class AuthError extends Error {
   constructor() {
