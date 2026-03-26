@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 class AgitationEvent(BaseModel):
     timestamp_s: int
-    action: str
+    action: str = Field(..., max_length=100)
     amount_g: Optional[float] = None
 
 
@@ -26,15 +26,15 @@ class BrewBase(BaseModel):
     water_weight_g: float = Field(..., gt=0)
     brew_style: Optional[str] = Field(None, max_length=50)
     grind_setting: Optional[str] = Field(None, max_length=120)
-    grind_setting_notes: Optional[str] = Field(None)
+    grind_setting_notes: Optional[str] = Field(None, max_length=2000)
     grinder_name: Optional[str] = Field(None, max_length=120)
     water_temp_c: Optional[int] = Field(None)
     bloom_time_s: Optional[int] = Field(None)
     total_brew_time_s: Optional[int] = Field(None)
-    agitation_events: Optional[List[AgitationEvent]] = Field(None)
-    tasting_notes: Optional[str] = Field(None)
-    flavor_tags: Optional[List[str]] = Field(None)
-    aroma_tags: Optional[List[str]] = Field(None)
+    agitation_events: Optional[List[AgitationEvent]] = Field(None, max_length=100)
+    tasting_notes: Optional[str] = Field(None, max_length=5000)
+    flavor_tags: Optional[List[str]] = Field(None, max_length=50)
+    aroma_tags: Optional[List[str]] = Field(None, max_length=50)
     rating: Optional[int] = Field(None, ge=1, le=10)
     aroma_rating: Optional[int] = Field(None, ge=1, le=10)
     flavor_rating: Optional[int] = Field(None, ge=1, le=10)
@@ -49,21 +49,21 @@ class BrewCreate(BrewBase):
 
 
 class BrewUpdate(BaseModel):
-    date: Optional[date]
-    bean_id: Optional[str]
+    date: Optional[date] = None
+    bean_id: Optional[str] = None
     bean_weight_g: Optional[float] = Field(None, gt=0)
     water_weight_g: Optional[float] = Field(None, gt=0)
     brew_style: Optional[str] = Field(None, max_length=50)
     grind_setting: Optional[str] = Field(None, max_length=120)
-    grind_setting_notes: Optional[str] = Field(None)
+    grind_setting_notes: Optional[str] = Field(None, max_length=2000)
     grinder_name: Optional[str] = Field(None, max_length=120)
     water_temp_c: Optional[int] = Field(None)
     bloom_time_s: Optional[int] = Field(None)
     total_brew_time_s: Optional[int] = Field(None)
-    agitation_events: Optional[List[AgitationEvent]] = Field(None)
-    tasting_notes: Optional[str] = Field(None)
-    flavor_tags: Optional[List[str]] = Field(None)
-    aroma_tags: Optional[List[str]] = Field(None)
+    agitation_events: Optional[List[AgitationEvent]] = Field(None, max_length=100)
+    tasting_notes: Optional[str] = Field(None, max_length=5000)
+    flavor_tags: Optional[List[str]] = Field(None, max_length=50)
+    aroma_tags: Optional[List[str]] = Field(None, max_length=50)
     rating: Optional[int] = Field(None, ge=1, le=10)
     aroma_rating: Optional[int] = Field(None, ge=1, le=10)
     flavor_rating: Optional[int] = Field(None, ge=1, le=10)
@@ -99,8 +99,8 @@ class ExportPayload(BaseModel):
 
 
 class ImportPayload(BaseModel):
-    beans: List["BeanImport"] = Field(default_factory=list)
-    brews: List["BrewImport"] = Field(default_factory=list)
+    beans: List["BeanImport"] = Field(default_factory=list, max_length=500)
+    brews: List["BrewImport"] = Field(default_factory=list, max_length=2000)
 
 
 class BrewImport(BrewCreate):

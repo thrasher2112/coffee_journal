@@ -1,7 +1,7 @@
 """CRUD helpers for Brew resources."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import List, Optional, Tuple
 
 from sqlalchemy import Select, func, select
@@ -10,24 +10,26 @@ from sqlalchemy.orm import Session, selectinload
 from ..models import Bean, Brew
 
 
-def _base_brew_query() -> Select:
+def _base_brew_query(user_id: str) -> Select:
     return (
         select(Brew)
         .options(selectinload(Brew.bean))
+        .where(Brew.user_id == user_id)
         .order_by(Brew.date.desc(), Brew.created_at.desc())
     )
 
 
 def list_brews(
     db: Session,
+    user_id: str,
     skip: int = 0,
     limit: int = 50,
     bean_id: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> Tuple[List[Brew], int]:
-    query = _base_brew_query()
-    count_query = select(func.count()).select_from(Brew)
+    query = _base_brew_query(user_id)
+    count_query = select(func.count()).select_from(Brew).where(Brew.user_id == user_id)
 
     if bean_id:
         query = query.where(Brew.bean_id == bean_id)
@@ -44,8 +46,11 @@ def list_brews(
     return items, total
 
 
-def get_brew(db: Session, brew_id: str) -> Optional[Brew]:
-    return db.get(Brew, brew_id)
+def get_brew(db: Session, brew_id: str, user_id: str) -> Optional[Brew]:
+    brew = db.get(Brew, brew_id)
+    if brew and brew.user_id != user_id:
+        return None
+    return brew
 
 
 def create_brew(db: Session, data: dict) -> Brew:
@@ -56,9 +61,18 @@ def create_brew(db: Session, data: dict) -> Brew:
     return brew
 
 
+_BREW_MUTABLE_FIELDS = frozenset({
+    "date", "bean_id", "bean_weight_g", "water_weight_g", "brew_style",
+    "grind_setting", "grind_setting_notes", "grinder_name", "water_temp_c",
+    "bloom_time_s", "total_brew_time_s", "agitation_events", "tasting_notes",
+    "flavor_tags", "aroma_tags", "rating", "aroma_rating", "flavor_rating",
+})
+
+
 def update_brew(db: Session, brew: Brew, data: dict) -> Brew:
     for key, value in data.items():
-        setattr(brew, key, value)
+        if key in _BREW_MUTABLE_FIELDS:
+            setattr(brew, key, value)
     db.add(brew)
     db.commit()
     db.refresh(brew)
@@ -70,8 +84,8 @@ def delete_brew(db: Session, brew: Brew) -> None:
     db.commit()
 
 
-def metrics_overview(db: Session) -> dict:
-    """Compute top beans, recent brews, and rating trends."""
+def metrics_overview(db: Session, user_id: str) -> dict:
+    """Compute top beans, recent brews, and rating trends for a user."""
 
     top_beans_query = (
         select(
@@ -81,6 +95,7 @@ def metrics_overview(db: Session) -> dict:
             func.avg(Brew.rating).label("avg_rating"),
         )
         .join(Brew, Brew.bean_id == Bean.id)
+        .where(Brew.user_id == user_id)
         .group_by(Bean.id)
         .order_by(func.avg(Brew.rating).desc())
         .limit(5)
@@ -88,6 +103,7 @@ def metrics_overview(db: Session) -> dict:
     recent_brews_query = (
         select(Brew.id, Brew.date, Brew.rating, Bean.name.label("bean_name"))
         .join(Bean, Bean.id == Brew.bean_id)
+        .where(Brew.user_id == user_id)
         .order_by(Brew.date.desc())
         .limit(10)
     )
@@ -97,6 +113,7 @@ def metrics_overview(db: Session) -> dict:
             func.avg(Brew.rating).label("avg_rating"),
             func.count(Brew.id).label("count"),
         )
+        .where(Brew.user_id == user_id)
         .group_by(Brew.date)
         .order_by(Brew.date)
     )

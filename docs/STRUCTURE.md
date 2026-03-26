@@ -1,83 +1,211 @@
 # Coffee Journal Architecture Overview
 
-This document explains how the stack is organized so contributors can quickly find the right layer.
+This document describes how the stack is organized for contributors.
 
 ## Top-Level Layout
+
 ```
 .
-├── docker-compose.yml        # orchestrates db, api, web
-├── Makefile                  # helper commands (docker-up, migrate, seed, etc.)
-├── AGENTS.md                 # contributor guide
-├── backend/                  # FastAPI backend
-│   ├── src/coffee_journal/   # application source
-│   ├── alembic/              # migrations
-│   ├── tests/                # pytest suites
-│   └── README.md             # backend runbook
-├── frontend/                 # Vite + React PWA
-│   └── src/                  # pages, components, hooks, lib
-├── docs/STRUCTURE.md         # this file
-└── docs/HANDOFF.txt          # roadmap + readiness checklist
+├── docker-compose.yml            # orchestrates db, api, web (production parity)
+├── docker-compose.override.yml   # dev overrides: source mounts + hot-reload
+├── Makefile                      # helper commands
+├── AGENTS.md                     # contributor guide
+├── .github/workflows/ci.yml      # CI pipeline
+├── backend/
+│   ├── src/coffee_journal/       # application source
+│   ├── alembic/versions/         # 9 DB migrations
+│   ├── tests/                    # pytest suites (SQLite in-memory)
+│   ├── requirements.txt
+│   └── pyproject.toml            # ruff + pytest config
+├── frontend/
+│   └── src/                      # pages, components, contexts, hooks, lib
+└── docs/
+    ├── STRUCTURE.md              # this file
+    └── HANDOFF.txt               # historical context
 ```
 
+---
+
 ## Backend (FastAPI)
-- **Entry point**: `backend/src/coffee_journal/main.py`
-  - Configures CORS, includes API router, exposes `/health`.
-- **Configuration**: `config.py` reads env vars (DB URL, API/front URLs, debug flag).
-- **Database**: `db.py` (SQLAlchemy engine/session). PostgreSQL in production; SQLite in tests.
-- **Models**: `models/bean.py`, `models/brew.py`
-  - Beans: metadata for each coffee.
-  - Brews: log entries including brew style (`brew_style`), grinder names/settings, agitation events, aroma/flavor ratings (`aroma_rating`, `flavor_rating`), flavor/aroma tags, ratios, and tasting notes.
-- **Schemas**: `schemas/*.py` define Pydantic models used by routers.
-- **CRUD**: `crud/bean.py`, `crud/brew.py`
-  - Beans CRUD now joins against brews to return usage metadata (first/last brew date, avg rating, brew count) and supports copying beans.
-- **Routers**: `routers/`
-  - `beans.py`: list/create/update/delete/copy + filters (`q`, `first_used_after`, `last_used_before`).
-  - `brews.py`: CRUD for brews.
-  - `metrics.py`: top beans, recent brews, rating trends.
-  - `data.py`: import/export/sync stubs.
-- **Scripts**: `scripts/seed_db.py` loads demo beans + brews (used on container start).
-- **Migrations**: Alembic revisions live under `alembic/versions`. Latest revisions add brew style plus aroma/grinder fields (`20250220_03`, `20250220_04`) and bean elevation (`20251216_05`); run `alembic upgrade head` after pulling.
-- **Tests**: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` use SQLite in-memory fixtures defined in `tests/conftest.py`.
+
+### Entry point — `main.py`
+- Configures CORS (explicit methods/headers, origin allowlist from env)
+- Adds `security_headers` HTTP middleware (CSP, X-Frame-Options, nosniff, Referrer-Policy)
+- Attaches shared rate limiter to `app.state`
+- Mounts `api_router` (prefix `/api`)
+- Exposes `/health` (DB probe)
+
+### Configuration — `config.py`
+- `Settings` dataclass reads env vars at class-definition time
+- `__post_init__` guard: if `DEBUG=false`, crashes on weak `JWT_SECRET` or missing `COOKIE_SECURE`
+- In tests: set `os.environ["DEBUG"] = "true"` **before** importing the app (done in `conftest.py`), or pass kwargs directly to `Settings()`
+
+### Database — `db.py`
+- SQLAlchemy 2.0 async-style session factory
+- PostgreSQL in production; SQLite in-memory for tests
+
+### Models — `models/`
+| Model | Key Fields |
+|---|---|
+| `User` | `id`, `email`, `display_name`, `token_version`, `created_at` |
+| `MagicLinkToken` | `email`, `token`, `expires_at`, `used` |
+| `Bean` | `user_id`, `name`, `roaster`, `origin`, `process`, `roast_level`, `elevation_m`, `notes` |
+| `Brew` | `user_id`, `bean_id`, `date`, `bean_weight_g`, `water_weight_g`, `brew_style`, `grinder_name`, `grind_setting`, `grind_setting_notes`, `water_temp_c`, `bloom_time_s`, `total_brew_time_s`, `agitation_events`, `tasting_notes`, `flavor_tags`, `aroma_tags`, `rating`, `aroma_rating`, `flavor_rating` |
+
+All user-owned data (`Bean`, `Brew`) has a `user_id` FK; every CRUD query filters by it.
+
+### Authentication — `auth.py`
+- `create_magic_link_token(db, email)` — creates a single-use 64-char hex token
+- `verify_magic_link_token(db, token)` — validates, marks used, finds/creates user
+- `cleanup_expired_tokens(db)` — called on every `/magic-link` request; deletes used/expired tokens
+- `create_session_jwt(user)` — HS256 JWT with `sub`, `email`, `jti`, `token_version`, `iss`, `aud`, `iat`, `exp`
+- `decode_session_jwt(token)` — validates signature, expiry, `iss`, `aud`
+- `get_current_user(session, db)` — FastAPI dependency; validates `token_version` against DB (session revocation)
+
+### Rate limiting — `rate_limit.py`
+- Single shared `Limiter` instance (avoids duplicate instances between `main.py` and routers)
+- Key function: `X-Forwarded-For` header → first IP (proxy-aware), fallback to `request.client.host`
+- Disabled in tests via `limiter.enabled = False` in `conftest.py`
+
+### Schemas — `schemas/`
+Input limits enforced at the Pydantic layer:
+- Bean text fields: `max_length=255` (name/roaster/origin), `max_length=5000` (notes)
+- Brew text fields: `max_length=5000` (tasting_notes), `max_length=2000` (grind_setting_notes)
+- Tag lists: `max_length=50` items
+- Agitation events: `max_length=100` items
+- Import: `max_length=500` beans, `max_length=2000` brews
+
+### CRUD — `crud/`
+- `bean.py`: search uses `%`/`_`-escaped LIKE; `update_bean` uses `_BEAN_MUTABLE_FIELDS` allowlist
+- `brew.py`: `update_brew` uses `_BREW_MUTABLE_FIELDS` allowlist
+- Ownership always checked: `get_bean(db, id, user_id)` returns `None` if user doesn't own it
+
+### Routers — `routers/`
+| Router | Prefix | Rate limited |
+|---|---|---|
+| `auth.py` | `/api/auth` | `/magic-link`: 5/min |
+| `beans.py` | `/api/beans` | `POST /`: 30/min |
+| `brews.py` | `/api/brews` | `POST /`: 30/min |
+| `data.py` | `/api` | `GET /export`: 10/min; `POST /import`: 5/min |
+| `metrics.py` | `/api/metrics` | — |
+
+### Migrations — `alembic/versions/`
+| Revision | Change |
+|---|---|
+| `20241202_01` | Initial tables (beans, brews) |
+| `20250220_02` | Add `brew_style` |
+| `20250220_03` | Add `aroma_rating`, `flavor_rating`, aroma/flavor tags |
+| `20250220_04` | Add `grinder_name` |
+| `20251216_05` | Add `elevation_m` on beans |
+| `20260325_06` | Add `users` + `magic_link_tokens` tables |
+| `20260325_07` | Add `user_id` FK to beans + brews |
+| `20260325_08` | Backfill + enforce NOT NULL on `user_id` |
+| `20260325_09` | Add `token_version` to users (session revocation) |
+
+### Tests — `tests/`
+70 tests across:
+- `test_health.py` — health endpoint
+- `test_beans.py` — bean CRUD + search + filters
+- `test_brews.py` — brew CRUD
+- `test_auth.py` — magic link flow, session cookies, logout + revocation
+- `test_multi_tenant.py` — cross-user isolation, IDOR checks
+- `test_config.py` — production guard behavior
+- `test_data.py` — import/export
+- `test_metrics.py` — metrics endpoint
+- `test_validation.py` — schema input limits
+
+Run via Docker (tests dir not in image):
+```bash
+docker compose run --rm --no-deps \
+  -v "$(pwd)/backend/tests:/app/tests" \
+  api python -m pytest tests/ -q
+```
+
+---
 
 ## Frontend (React + Vite + Tailwind)
-- **Entry**: `frontend/src/main.tsx` mounts `App`.
-- **Routing**: `frontend/src/App.tsx` uses React Router with pages:
-  - `HomePage`: Quick Brew, rating trend chart, top beans, recent brews.
-  - `BeansPage`: search/filterable bean library with edit/copy/delete flows.
-  - `AllCupsPage`: new archive listing every brew (newest first).
-  - `BestCupsPage`: brews rated ≥ 8.
-  - `BrewFormPage`: full brew form (beyond Quick Brew).
-  - `SettingsPage`: import/export + offline tools, temperature-unit toggle, grinder management (add/remove/preferred), offline vault, sync stubs.
-- **Components**:
-  - `QuickLogBar`: captures brews with Hoffmann ratio presets, °C/°F-aware temperature inputs, grinder dropdown tied to settings, agitation timeline builder, and separate overall/aroma/flavor sliders.
-  - `BrewCard`, `BeanPicker`, `FlavorWheel`, `AromaTags`, etc. (`BrewCard` respects temperature preferences and surfaces aroma tags + grinder metadata.)
-  - `NavBar`: contains navigation links (Home, Beans, All Cups, Best Cups, Settings) plus Quick Log shortcut.
-- **State & Hooks**:
-  - `hooks/useLocalBrewStore.ts`: offline queue for unsynced brews.
-- **API client**: `lib/api.ts`
-  - Wraps fetch with JSON defaults. Provides helper functions for beans (with filters & copy), brews, metrics, import/export, sync.
-- **Styles**:
-  - Tailwind config + CSS variables under `frontend/src/styles`.
-  - Style guide reference: `frontend/src/assets/style-guide.md`, plus `backend/style_example.jpg`.
+
+### Entry — `main.tsx`
+- Unregisters any stale service workers before registering the new one (prevents old SW from intercepting `/api/` calls)
+- Mounts `App` inside `AuthProvider` + `PreferencesProvider`
+
+### Routing — `App.tsx`
+All routes under `/` are wrapped in `ProtectedRoute` (redirects to `/login` if not authenticated).
+
+| Route | Page | Notes |
+|---|---|---|
+| `/login` | `LoginPage` | Requests magic link |
+| `/auth/verify` | `AuthVerifyPage` | POSTs token to backend, sets cookie |
+| `/` | `HomePage` | Quick Brew + dashboard charts |
+| `/beans` | `BeansPage` | Search, filter, edit/copy/delete |
+| `/all-cups` | `AllCupsPage` | Full brew archive |
+| `/best-cups` | `BestCupsPage` | Brews rated ≥8 |
+| `/settings` | `SettingsPage` | Preferences, import/export, grinders |
+
+### Auth flow
+1. `AuthVerifyPage` extracts `?token=` from URL, POSTs it to `POST /api/auth/verify` (token in JSON body — never in URL to backend)
+2. Backend sets `session` HttpOnly cookie
+3. `AuthContext.checkAuth()` calls `GET /api/auth/me`; if 401, clears auth state
+
+### Service worker — `public/sw.js`
+- Cache version `v2`, auto-activates with `skipWaiting()` + `clients.claim()`
+- **Never intercepts `/api/` requests** (bypasses entirely)
+- Only caches `res.ok` responses (no error pages cached)
+
+### API client — `lib/api.ts`
+- `request<T>()` wrapper: adds `credentials: 'include'`, `Content-Type: application/json`; throws `AuthError` on 401
+- Auth functions: `requestMagicLink`, `verifyMagicLink` (POST), `fetchCurrentUser`, `logoutUser`
+- Data functions: `fetchBeans`, `createBean`, `updateBean`, `deleteBean`, `copyBean`
+- Brew functions: `fetchBrews`, `createBrew`
+- Util: `syncBrews` (flushes offline queue)
+
+---
 
 ## Data Flow
-1. **User logs a brew** via Quick Log → `createBrew` -> `/api/brews/` → DB. Metrics endpoint reflects updated rating trends/top beans.
-2. **Beans page** fetches `/api/beans/` with optional query params. Response includes usage metadata aggregated server-side.
-3. **All Cups** pulls `/api/brews/`, sorts client-side (newest first), displays via `BrewCard`.
-4. **Metrics** fetch `/api/metrics/overview` for charts (rating trend, top beans, recent brews).
+
+```
+User enters email → POST /api/auth/magic-link
+  → token printed to logs (dev) or emailed (prod)
+  → user clicks link → frontend extracts token from URL
+  → POST /api/auth/verify {token}
+  → backend validates token, creates JWT, sets HttpOnly cookie
+  → frontend calls GET /api/auth/me to confirm auth
+  → redirect to /
+
+Authenticated requests:
+  → cookie sent automatically (credentials: 'include')
+  → get_current_user: decode JWT → check token_version vs DB
+  → all CRUD filtered by user_id
+
+Logout:
+  → POST /api/auth/logout
+  → backend increments user.token_version
+  → all existing JWTs rejected on next use
+```
+
+---
 
 ## Environments & Commands
-- **Everything at once**: `docker compose up --build` (db exposed on host port 5555)
-- **Backend dev**: `uvicorn coffee_journal.main:app --reload`
-- **Frontend dev**: `npm run dev` (port 5173 by default)
-- **Tests**: `cd coffee_journal && pytest`
-- **Build**: `npm run build` (frontend), `docker compose build` (full stack)
-- **Migrations**: `alembic upgrade head`
 
-## Known Gaps / Future Work
-- Authentication & multi-tenant safeguards are not implemented.
-- Google Drive sync endpoint is a stub.
-- Frontend lacks automated tests; manual QA is still required.
-- Import/export needs stronger validation/pagination for large datasets.
+```bash
+# Full stack (prod-parity dev)
+docker compose up --build
 
-Refer back to `AGENTS.md` for contributor expectations and `docs/HANDOFF.txt` for roadmap context, especially if you’re preparing the repo for a public GitHub release.
+# Backend dev (local venv)
+cd backend && python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn coffee_journal.main:app --reload
+
+# Frontend dev
+cd frontend && npm install && npm run dev
+
+# Tests
+docker compose run --rm --no-deps -v "$(pwd)/backend/tests:/app/tests" api python -m pytest tests/ -q
+docker compose run --rm --no-deps web npx vitest run
+
+# Migrations
+docker compose run --rm api alembic upgrade head
+
+# Lint
+cd backend && python -m ruff check src tests
+```

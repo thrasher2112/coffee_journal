@@ -12,7 +12,12 @@ root.render(
 );
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
+  window.addEventListener('load', async () => {
+    // Force-replace any stale service worker
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const reg of regs) {
+      await reg.unregister();
+    }
     navigator.serviceWorker.register('/sw.js').catch((error) => {
       console.warn('Service worker registration failed', error);
     });

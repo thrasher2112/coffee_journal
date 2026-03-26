@@ -1,14 +1,16 @@
 """Brew endpoints."""
-from __future__ import annotations
 
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from .. import crud
+from ..auth import get_current_user
 from ..db import get_db
+from ..models.user import User
+from ..rate_limit import limiter
 from ..schemas.brew import BrewCreate, BrewRead, BrewUpdate, BrewListResponse
 
 router = APIRouter()
@@ -29,9 +31,11 @@ def list_brews(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     items, total = crud.brew.list_brews(
         db,
+        user_id=current_user.id,
         skip=skip,
         limit=limit,
         bean_id=bean_id,
@@ -43,15 +47,32 @@ def list_brews(
 
 
 @router.post("/", response_model=BrewRead, status_code=status.HTTP_201_CREATED)
-def create_brew(payload: BrewCreate, db: Session = Depends(get_db)):
-    brew = crud.brew.create_brew(db, payload.model_dump())
+@limiter.limit("30/minute")
+def create_brew(
+    request: Request,
+    payload: BrewCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify the bean belongs to this user
+    if not crud.bean.get_bean(db, payload.bean_id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found"
+        )
+    data = payload.model_dump()
+    data["user_id"] = current_user.id
+    brew = crud.brew.create_brew(db, data)
     db.refresh(brew, attribute_names=["bean"])
     return _to_schema(brew)
 
 
 @router.get("/{brew_id}", response_model=BrewRead)
-def get_brew(brew_id: str, db: Session = Depends(get_db)):
-    brew = crud.brew.get_brew(db, brew_id)
+def get_brew(
+    brew_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    brew = crud.brew.get_brew(db, brew_id, current_user.id)
     if not brew:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brew not found")
     db.refresh(brew, attribute_names=["bean"])
@@ -59,18 +80,33 @@ def get_brew(brew_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{brew_id}", response_model=BrewRead)
-def update_brew(brew_id: str, payload: BrewUpdate, db: Session = Depends(get_db)):
-    brew = crud.brew.get_brew(db, brew_id)
+def update_brew(
+    brew_id: str,
+    payload: BrewUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    brew = crud.brew.get_brew(db, brew_id, current_user.id)
     if not brew:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brew not found")
+    # If bean_id is being changed, verify ownership of the new bean
+    if payload.bean_id is not None:
+        if not crud.bean.get_bean(db, payload.bean_id, current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found"
+            )
     brew = crud.brew.update_brew(db, brew, payload.model_dump(exclude_unset=True))
     db.refresh(brew, attribute_names=["bean"])
     return _to_schema(brew)
 
 
 @router.delete("/{brew_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_brew(brew_id: str, db: Session = Depends(get_db)):
-    brew = crud.brew.get_brew(db, brew_id)
+def delete_brew(
+    brew_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    brew = crud.brew.get_brew(db, brew_id, current_user.id)
     if not brew:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brew not found")
     crud.brew.delete_brew(db, brew)

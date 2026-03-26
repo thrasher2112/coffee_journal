@@ -1,54 +1,130 @@
 # Repository Guidelines
 
-Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend (`frontend/`) orchestrated via the root `docker-compose.yml`. The stack exposes API port `8000` and web port `3000`.
+Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend (`frontend/`) orchestrated via the root `docker-compose.yml`. API runs on port `8000`, frontend on port `3000`.
 
 ## Project Structure
+
 ```
 .
 ├── AGENTS.md
-├── backend/                 # FastAPI service, Alembic, tests, docs
-│   ├── src/coffee_journal   # config, routers, CRUD, models, scripts
-│   ├── tests/               # pytest suites (SQLite in-memory)
-│   ├── alembic/             # migrations
-│   └── README.md            # backend runbook
-├── frontend/                # React + Vite PWA
-│   └── src/                 # pages, components, lib/api, styles
-├── docs/STRUCTURE.md        # architecture map
-├── docker-compose.yml       # db + api + web services
-└── Makefile                 # helper targets (docker-up, migrate, etc.)
+├── backend/
+│   ├── src/coffee_journal/
+│   │   ├── main.py          # CORS, security headers middleware, app factory
+│   │   ├── config.py        # Settings dataclass (env vars + production guards)
+│   │   ├── auth.py          # Magic links, JWT, session revocation
+│   │   ├── email.py         # Resend / console fallback
+│   │   ├── rate_limit.py    # Shared slowapi Limiter instance
+│   │   ├── models/          # SQLAlchemy ORM models
+│   │   ├── schemas/         # Pydantic v2 schemas (input limits)
+│   │   ├── crud/            # DB helpers
+│   │   └── routers/         # beans, brews, auth, metrics, data
+│   ├── alembic/versions/    # DB migrations
+│   ├── tests/               # pytest suites
+│   └── pyproject.toml       # ruff + pytest config
+├── frontend/
+│   └── src/
+│       ├── pages/           # Login, AuthVerify, Home, Beans, AllCups, BestCups, Settings
+│       ├── components/      # NavBar, ProtectedRoute, QuickLogBar, BrewCard, …
+│       ├── contexts/        # AuthContext, PreferencesContext
+│       ├── hooks/           # useLocalBrewStore
+│       └── lib/api.ts       # All API calls
+├── .github/workflows/ci.yml # CI: lint + test + build
+├── docker-compose.yml
+├── docker-compose.override.yml
+├── Makefile
+└── docs/STRUCTURE.md        # Architecture deep-dive
 ```
 
 ## Development Workflow
-- Copy `backend/.env.example` to `.env`, then run `docker compose up --build` from repo root to start Postgres, API, and Web.
-- Backend dev:
-  - `cd backend`
-  - `python -m venv .venv && source .venv/bin/activate`
-  - `pip install -r requirements.txt`
-  - `uvicorn coffee_journal.main:app --reload`
-- Frontend dev:
-  - `cd frontend && npm install`
-  - `npm run dev`
-- Apply migrations with `cd backend && alembic upgrade head`. The API container also runs migrations + seeds automatically on boot.
-- Latest revisions (`20250220_03` and `20250220_04`) add aroma/flavor rating fields and `grinder_name`; `20251216_05` adds bean `elevation_m`. Run migrations after pulling to avoid column-missing errors.
-- Build static assets with `cd frontend && npm run build` (Compose does this during image build as well).
 
-## Testing Guidelines
-- Backend tests live in `backend/tests`. Run `pytest` from `backend/` (SQLite in-memory DB). Keep regression coverage for new routers/CRUD helpers.
-- Linting: `ruff check backend/src`.
-- Frontend currently relies on manual/visual QA; add React Testing Library coverage when touching complex logic (QuickLog, Beans filters, All Cups sorting).
+```bash
+# Full stack
+cp backend/.env.example backend/.env
+docker compose up --build
+
+# Backend dev (local)
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn coffee_journal.main:app --reload
+
+# Frontend dev (local)
+cd frontend && npm install && npm run dev
+
+# Apply migrations
+docker compose run --rm api alembic upgrade head
+
+# Seed demo data
+docker compose run --rm api python -m coffee_journal.scripts.seed_db
+```
+
+## Testing
+
+```bash
+# Backend — tests dir is NOT in the Docker image; mount it explicitly
+docker compose run --rm --no-deps \
+  -v "$(pwd)/backend/tests:/app/tests" \
+  api python -m pytest tests/ -q
+
+# Frontend — node_modules owned by root in Docker, must use compose
+docker compose run --rm --no-deps web npx vitest run
+
+# Make targets
+make api-test
+make api-test-auth   # auth + multi-tenant only
+make frontend-test
+make lint            # ruff check
+```
+
+Keep regression coverage when touching routers, CRUD helpers, or auth logic.
+
+## Critical Patterns
+
+**`from __future__ import annotations` must NOT appear in router files.**
+Lazy type evaluation prevents Pydantic from resolving schema types at import time,
+causing `PydanticUndefinedAnnotation` at startup. This applies to all files under
+`routers/`. All other modules can use it freely.
+
+**Pydantic v2**: `Optional[T]` fields without `= None` are treated as required. Always add `= None`.
+
+**Rate limiter**: there is one shared `Limiter` in `rate_limit.py`. Never create a second instance
+in a router — import from `rate_limit` instead. In tests, `limiter.enabled = False` is set in
+`conftest.py` before any requests are made.
+
+**Settings dataclass**: `os.getenv()` defaults are evaluated at class-definition time (module import),
+not at instantiation. `patch.dict(os.environ)` has no effect on existing defaults.
+To test different configs, pass kwargs directly: `Settings(debug=False, jwt_secret="...")`.
+
+**conftest.py ordering**: `os.environ["DEBUG"] = "true"` must be set before any app imports
+so `Settings.__post_init__` doesn't raise on the default `jwt_secret`. This is already in place.
+
+**SQLite tests**: FK cascades are not enforced. Test deletions by asserting 404 responses,
+not by counting cascaded row deletions.
+
+**dependency_overrides is global**: use the `make_client(user)` factory fixture for multi-tenant
+tests so each client has the correct user injected.
 
 ## Coding Standards
-- Python: Black/PEP8, prefer dataclass settings, SQLAlchemy 2.0 style ORM, Pydantic v2 `model_validate`.
-- TypeScript/React: functional components, hooks, Tailwind utility classes. Co-locate small helpers (e.g., `lib/api.ts`) and keep stateful pages under `src/pages`.
-- Commits follow Conventional Commits (e.g., `feat: add all cups page`, `fix: beans filter timezone math`).
-- When touching brew payloads, keep the new `grinder_name`, `aroma_rating`, `flavor_rating`, and `aroma_tags` fields wired through schemas, tests, and UI.
 
-## Release & Ops Notes
-- `docker compose up --build` is the canonical way to boot prod parity locally. Postgres maps to host port `5555` by default (container 5432).
-- Makefile shortcuts: `make docker-up`, `make docker-down`, `make migrate`, `make seed`, `make frontend-build`.
-- Seeds (`backend/src/coffee_journal/scripts/seed_db.py`) load demo beans/brews; rerun after dropping data to keep dashboards populated.
+- **Python**: Black/PEP8, SQLAlchemy 2.0 style, Pydantic v2 `model_validate`/`model_dump`
+- **TypeScript/React**: functional components, hooks, Tailwind utilities
+- **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`)
+- When adding a field to Brew or Bean: wire it through the model, migration, schema, CRUD, router, and frontend types/API client
 
-## Security & Configuration
-- Never commit `.env` files; secrets stay in local `.env` copies (ignored via `.gitignore`).
-- Postgres credentials default to `postgres/postgres`; adjust in `.env` for shared deployments.
-- When wiring new third-party services (Drive sync, auth), prototype inside containers before exposing credentials, and document required environment vars in `backend/.env.example`.
+## Security Rules
+
+- Never commit `.env` files (already `.gitignore`d)
+- Never log or include the raw magic link token in responses — it goes to email/logs only
+- All protected endpoints must use `Depends(get_current_user)`
+- All CRUD functions must accept and filter by `user_id`
+- New `setattr`-based update functions must use a field allowlist (`_BEAN_MUTABLE_FIELDS` / `_BREW_MUTABLE_FIELDS` pattern)
+- Search strings passed to LIKE must be escaped (see `crud/bean.py` for the pattern)
+- New endpoints that create or modify data should have a `@limiter.limit(...)` decorator
+
+## Ops Notes
+
+- Postgres maps to host port `5555` (container `5432`) to avoid conflicts
+- The API container runs `alembic upgrade head` + seed on every boot (safe to re-run)
+- `docker compose down -v` drops the Postgres volume — data is lost
+- `JWT_EXPIRY_HOURS=24` by default; the dev `.env.example` leaves it at 24
+- In production: set `DEBUG=false`, `JWT_SECRET` (32+ chars), `COOKIE_SECURE=true`, `COOKIE_DOMAIN`

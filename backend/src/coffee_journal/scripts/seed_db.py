@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Bean, Brew
+from ..models.user import User
+
+SEED_USER_EMAIL = "demo@coffee-journal.local"
 
 SAMPLE_BEANS = [
     {
@@ -74,29 +77,50 @@ SAMPLE_BREWS = [
 ]
 
 
+def _get_or_create_seed_user(session: Session) -> User:
+    """Return the demo seed user, creating it if needed."""
+    user = session.query(User).filter(User.email == SEED_USER_EMAIL).first()
+    if not user:
+        user = User(email=SEED_USER_EMAIL, display_name="Demo User")
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return user
+
+
 def seed(session: Session) -> None:
-    existing = {bean.name: bean for bean in session.query(Bean).all()}
+    seed_user = _get_or_create_seed_user(session)
+
+    existing = {
+        bean.name: bean
+        for bean in session.query(Bean).filter(Bean.user_id == seed_user.id).all()
+    }
     for bean_data in SAMPLE_BEANS:
         bean = existing.get(bean_data["name"])
         if not bean:
-            bean = Bean(**bean_data)
+            bean = Bean(user_id=seed_user.id, **bean_data)
             session.add(bean)
             session.commit()
             session.refresh(bean)
             existing[bean.name] = bean
 
     for brew_data in SAMPLE_BREWS:
-        bean = existing.get(brew_data.pop("bean_name"))
+        bean_name = brew_data.pop("bean_name", None) or brew_data.pop("bean_name", None)
+        bean = existing.get(bean_name)
         if not bean:
             continue
         has_brew = (
             session.query(Brew)
-            .filter(Brew.bean_id == bean.id, Brew.date == brew_data["date"])
+            .filter(
+                Brew.bean_id == bean.id,
+                Brew.user_id == seed_user.id,
+                Brew.date == brew_data["date"],
+            )
             .first()
         )
         if has_brew:
             continue
-        session.add(Brew(bean_id=bean.id, **brew_data))
+        session.add(Brew(user_id=seed_user.id, bean_id=bean.id, **brew_data))
         session.commit()
 
 
