@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coffee-journal-cache-v2';
+const CACHE_NAME = 'coffee-journal-cache-v3';
 const OFFLINE_URLS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
