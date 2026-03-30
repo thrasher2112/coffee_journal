@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 from datetime import datetime, date, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
+
+if TYPE_CHECKING:
+    from .user import User
 
 
 class Brew(Base):
@@ -18,6 +21,9 @@ class Brew(Base):
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid4()), unique=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
     )
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     bean_id: Mapped[str] = mapped_column(
@@ -52,6 +58,7 @@ class Brew(Base):
         nullable=False,
     )
 
+    user: Mapped["User"] = relationship("User", back_populates="brews")
     bean = relationship("Bean", back_populates="brews")
 
     @property

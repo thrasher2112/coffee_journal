@@ -1,14 +1,16 @@
 """Bean endpoints."""
-from __future__ import annotations
 
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from .. import crud
+from ..auth import get_current_user
 from ..db import get_db
+from ..models.user import User
+from ..rate_limit import limiter
 from ..schemas.bean import BeanCreate, BeanRead, BeanUpdate, BeanListResponse
 
 router = APIRouter()
@@ -22,9 +24,11 @@ def list_beans(
     first_used_after: Optional[date] = Query(None),
     last_used_before: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     rows, total = crud.bean.list_beans(
         db,
+        user_id=current_user.id,
         skip=skip,
         limit=limit,
         q=q,
@@ -46,29 +50,50 @@ def list_beans(
 
 
 @router.post("/", response_model=BeanRead, status_code=status.HTTP_201_CREATED)
-def create_bean(payload: BeanCreate, db: Session = Depends(get_db)):
-    return crud.bean.create_bean(db, payload.model_dump())
+@limiter.limit("30/minute")
+def create_bean(
+    request: Request,
+    payload: BeanCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    data = payload.model_dump()
+    data["user_id"] = current_user.id
+    return crud.bean.create_bean(db, data)
 
 
 @router.get("/{bean_id}", response_model=BeanRead)
-def get_bean(bean_id: str, db: Session = Depends(get_db)):
-    bean = crud.bean.get_bean(db, bean_id)
+def get_bean(
+    bean_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bean = crud.bean.get_bean(db, bean_id, current_user.id)
     if not bean:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
     return bean
 
 
 @router.put("/{bean_id}", response_model=BeanRead)
-def update_bean(bean_id: str, payload: BeanUpdate, db: Session = Depends(get_db)):
-    bean = crud.bean.get_bean(db, bean_id)
+def update_bean(
+    bean_id: str,
+    payload: BeanUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bean = crud.bean.get_bean(db, bean_id, current_user.id)
     if not bean:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
     return crud.bean.update_bean(db, bean, payload.model_dump(exclude_unset=True))
 
 
 @router.delete("/{bean_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_bean(bean_id: str, db: Session = Depends(get_db)):
-    bean = crud.bean.get_bean(db, bean_id)
+def delete_bean(
+    bean_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bean = crud.bean.get_bean(db, bean_id, current_user.id)
     if not bean:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
     crud.bean.delete_bean(db, bean)
@@ -76,8 +101,12 @@ def delete_bean(bean_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{bean_id}/copy", response_model=BeanRead, status_code=status.HTTP_201_CREATED)
-def copy_bean(bean_id: str, db: Session = Depends(get_db)):
-    bean = crud.bean.get_bean(db, bean_id)
+def copy_bean(
+    bean_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bean = crud.bean.get_bean(db, bean_id, current_user.id)
     if not bean:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
     duplicate = crud.bean.copy_bean(db, bean)

@@ -14,6 +14,7 @@ RowType = Tuple[Bean, Optional[date], Optional[date], Optional[float], Optional[
 
 def list_beans(
     db: Session,
+    user_id: str,
     skip: int = 0,
     limit: int = 50,
     q: Optional[str] = None,
@@ -28,6 +29,7 @@ def list_beans(
             func.avg(Brew.rating).label("avg_rating"),
             func.count(Brew.id).label("brew_count"),
         )
+        .where(Brew.user_id == user_id)
         .group_by(Brew.bean_id)
         .subquery()
     )
@@ -41,17 +43,19 @@ def list_beans(
             usage_stats.c.brew_count,
         )
         .outerjoin(usage_stats, Bean.id == usage_stats.c.bean_id)
+        .where(Bean.user_id == user_id)
         .order_by(Bean.created_at.desc())
     )
     count_query = (
         select(func.count())
         .select_from(Bean)
-        .outerjoin(usage_stats, Bean.id == usage_stats.c.bean_id)
+        .where(Bean.user_id == user_id)
     )
 
     conditions = []
     if q:
-        like_value = f"%{q.lower()}%"
+        escaped_q = q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_value = f"%{escaped_q}%"
         conditions.append(
             or_(
                 func.lower(Bean.name).like(like_value),
@@ -66,15 +70,20 @@ def list_beans(
 
     if conditions:
         base_query = base_query.where(*conditions)
-        count_query = count_query.where(*conditions)
+        count_query = count_query.outerjoin(
+            usage_stats, Bean.id == usage_stats.c.bean_id
+        ).where(*conditions)
 
     total = db.scalar(count_query) or 0
     rows = db.execute(base_query.offset(skip).limit(limit)).all()
     return rows, total
 
 
-def get_bean(db: Session, bean_id: str) -> Optional[Bean]:
-    return db.get(Bean, bean_id)
+def get_bean(db: Session, bean_id: str, user_id: str) -> Optional[Bean]:
+    bean = db.get(Bean, bean_id)
+    if bean and bean.user_id != user_id:
+        return None
+    return bean
 
 
 def create_bean(db: Session, data: dict) -> Bean:
@@ -85,9 +94,15 @@ def create_bean(db: Session, data: dict) -> Bean:
     return bean
 
 
+_BEAN_MUTABLE_FIELDS = frozenset({
+    "name", "roaster", "origin", "process", "roast_level", "elevation_m", "notes",
+})
+
+
 def update_bean(db: Session, bean: Bean, data: dict) -> Bean:
     for key, value in data.items():
-        setattr(bean, key, value)
+        if key in _BEAN_MUTABLE_FIELDS:
+            setattr(bean, key, value)
     db.add(bean)
     db.commit()
     db.refresh(bean)
@@ -106,6 +121,7 @@ def copy_bean(db: Session, bean: Bean) -> Bean:
     if len(new_name) > 255:
         new_name = base_name[: 255 - len(suffix)] + suffix
     data = {
+        "user_id": bean.user_id,
         "name": new_name,
         "roaster": bean.roaster,
         "origin": bean.origin,

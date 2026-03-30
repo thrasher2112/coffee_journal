@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { ExportImportModal } from '../components/ExportImportModal';
+import { useAuth } from '../contexts/AuthContext';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
 import { importData, syncBrews } from '../lib/api';
 import type { BrewDraft } from '../types';
 import { TemperatureUnit, usePreferences } from '../contexts/PreferencesContext';
 
 export function SettingsPage() {
+  const { user, logout } = useAuth();
   const { brews, unsynced, markSynced, importLocal } = useLocalBrewStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -198,6 +200,19 @@ export function SettingsPage() {
             );
           })}
         </ul>
+      </section>
+      <section className="journal-card space-y-4 p-6">
+        <div>
+          <h2 className="text-2xl font-display text-espresso">Account</h2>
+          <p className="text-sm text-moss">Signed in as <span className="text-caramel">{user?.email}</span></p>
+        </div>
+        <button
+          type="button"
+          onClick={logout}
+          className="rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel"
+        >
+          Sign out
+        </button>
       </section>
       <ExportImportModal open={modalOpen} onClose={() => setModalOpen(false)} onExport={handleExport} onImport={handleImport} />
     </section>

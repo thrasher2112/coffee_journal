@@ -1,14 +1,25 @@
-import type { Bean, Brew, BrewDraft, MetricsOverview } from '../types';
+import type { Bean, Brew, BrewDraft, MetricsOverview, User } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || (globalThis as any).__API_URL__ || 'http://localhost:8000';
 
+class AuthError extends Error {
+  constructor() {
+    super('Not authenticated');
+    this.name = 'AuthError';
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json'
     },
     ...init
   });
+  if (res.status === 401) {
+    throw new AuthError();
+  }
   if (!res.ok) {
     throw new Error(`Request failed: ${res.status}`);
   }
@@ -17,6 +28,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
+// ---- Auth ----
+
+export async function requestMagicLink(email: string): Promise<{ message: string }> {
+  return request('/api/auth/magic-link', {
+    method: 'POST',
+    body: JSON.stringify({ email })
+  });
+}
+
+export async function verifyMagicLink(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/auth/verify`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (res.ok) return;
+  const body = await res.json().catch(() => ({}));
+  throw new Error((body as any).detail || 'Verification failed');
+}
+
+export async function fetchCurrentUser(): Promise<User> {
+  return request<User>('/api/auth/me');
+}
+
+export async function logoutUser(): Promise<void> {
+  return request('/api/auth/logout', { method: 'POST' });
+}
+
+export { AuthError };
+
+// ---- Beans ----
 
 type BeanFilters = {
   q?: string;
@@ -60,6 +104,8 @@ export async function copyBean(beanId: string) {
   });
 }
 
+// ---- Brews ----
+
 export async function fetchBrews(): Promise<Brew[]> {
   const data = await request<{ items: Brew[]; total: number }>(`/api/brews/`);
   return data.items;
@@ -72,9 +118,13 @@ export async function createBrew(brew: BrewDraft): Promise<Brew> {
   });
 }
 
+// ---- Metrics ----
+
 export async function fetchMetrics(): Promise<MetricsOverview> {
   return request<MetricsOverview>(`/api/metrics/overview`);
 }
+
+// ---- Data ----
 
 export async function exportData() {
   return request(`/api/export`);

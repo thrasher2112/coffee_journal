@@ -1,34 +1,65 @@
-Coffee Journal Handoff Summary
-------------------------------
+Coffee Journal — Current State (2026-03-26)
+--------------------------------------------
 
-Current Repository State
-- Root `docker-compose.yml` orchestrates Postgres 16 (`db`), FastAPI (`api` + Alembic + seed runner), and the React/Tailwind PWA (`web`). `docker compose up --build` from repo root boots the full stack (API :8000, frontend :3000, Postgres host port :5555 → container :5432).
-- Backend (`backend/src/coffee_journal`) now exposes enriched bean metadata (first/last brew dates, average rating, brew counts, elevation) plus brew-style-aware logging. Routers cover beans/brews/metrics/import/export/sync, with Alembic migrations (latest add aroma/flavor ratings, grinder names, brew_style columns, and bean elevation `20251216_05`).
-- Tests: `tests/test_health.py`, `tests/test_beans.py`, `tests/test_brews.py` run via `pytest` (SQLite in-memory). Ruff is configured via `pyproject.toml`.
-- Frontend (`frontend/`) includes Quick Brew with style presets, grinder dropdown, °C/°F-aware temperature inputs, advanced agitation builder, aroma/flavor sliders & tags, an enhanced Beans library (search, filters, edit/copy/delete), Best Cups, the All Cups archive, and Settings with measurement + grinder management alongside offline/export tools.
-- Documentation: updated `AGENTS.md`, `backend/README.md`, and `docs/STRUCTURE.md` cover contributor workflow, runbooks, and architecture.
+Stack
+- Backend: FastAPI + SQLAlchemy 2.0 + Alembic + PostgreSQL (psycopg3), Python 3.11
+- Frontend: React 18 + TypeScript + Vite + Tailwind, PWA
+- Auth: Magic link (passwordless) → JWT HttpOnly cookie, 24h lifetime
+- Tests: 70 backend (pytest/SQLite), 17 frontend (vitest/RTL)
+- CI: GitHub Actions (lint + test + build on PR)
 
-GitHub Publishing Checklist
-- Verify `.env` files stay local (already `.gitignore`d) and run a quick `rg`/`detect-secrets` scan before pushing to catch stray credentials.
-- Add a LICENSE (MIT/Apache/etc.) so repo visitors understand usage rights.
-- Run `make api-test` and `make frontend-build` locally to ensure CI will stay green when the repo goes public.
-- Surface outstanding production items (auth, multitenancy, ops) as GitHub issues using the “Direction & Next Steps” list below.
+What's Implemented
+- Full passwordless auth: magic-link email → JWT session → session revocation on logout
+- Multi-tenancy: every bean/brew is owned by a user (user_id FK, filtered in all queries)
+- Security hardened: 22 audit issues resolved (see README Security section)
+- Quick Brew logging with style presets, grinder management, agitation timeline, split scoring
+- Beans library: search, date filters, edit/copy/delete, usage metadata
+- All Cups / Best Cups brew archives
+- JSON import/export (rate limited)
+- PWA with offline queue (localStorage) that syncs on reconnect
+- Metrics dashboard (top beans, recent brews, rating trends)
 
-Infrastructure & Commands
-- `.env.example` (copy to `.env`) defines DB creds plus `API_URL`/`FRONTEND_URL`/`VITE_API_URL`. Compose + Makefiles read it automatically.
-- Make targets (repo root `Makefile`): `docker-up`, `docker-down`, `migrate`, `seed`, `frontend-build`, `api-test`. API-specific commands also live in `backend/Makefile`.
-- Postgres maps to host port 5555 by default (container 5432) to avoid local collisions.
-- Backend container entrypoint runs `alembic upgrade head` + `python -m coffee_journal.scripts.seed_db` before launching uvicorn. Frontend container builds `npm run build` output and serves via `serve -s dist -l 3000`.
-- Manual commands:
-  - Backend dev: `cd backend && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
-  - Frontend dev: `cd frontend && npm install && npm run dev`
-  - Standalone migrations: `cd backend && alembic upgrade head`
+Environment Variables (backend/.env.example is the source of truth)
+- DATABASE_URL          PostgreSQL connection string
+- DEBUG                 true in dev; false in prod triggers startup guards
+- JWT_SECRET            32+ chars; crashes at startup if missing/weak in prod
+- JWT_EXPIRY_HOURS      Default 24
+- COOKIE_SECURE         Must be true in production (HTTPS)
+- COOKIE_DOMAIN         Your domain in production
+- RESEND_API_KEY        Leave blank → links printed to container logs
+- MAGIC_LINK_EXPIRY_MINUTES  Default 15
+- FRONTEND_URL / API_URL     Used for CORS + magic link URL construction
 
-Direction & Next Steps
-- Build cupping-session tracking + authentication (magic links vs OAuth TBD) so cafés can collaborate safely.
-- Harden import/export (validation, pagination) and multi-tenant safeguards if multiple shops share an instance.
-- Implement Drive sync behind the existing stub, including OAuth flow + job queue.
-- Add frontend tests (React Testing Library) for Beans filters/edit mode, Quick Brew presets + grinder/temperature preferences, and All Cups ordering.
-- Explore media uploads (brew photos) and storage strategy; update schemas/UI accordingly.
+Database Migrations (9 total)
+- 20241202_01  Initial beans + brews tables
+- 20250220_02  brew_style
+- 20250220_03  aroma/flavor ratings + tags
+- 20250220_04  grinder_name
+- 20251216_05  bean elevation_m
+- 20260325_06  users + magic_link_tokens
+- 20260325_07  user_id FK on beans/brews
+- 20260325_08  Backfill + NOT NULL on user_id
+- 20260325_09  token_version on users (session revocation)
 
-Use this summary as the context packet when continuing work in GPT 5.1.
+Running Tests
+  Backend (Docker):
+    docker compose run --rm --no-deps \
+      -v "$(pwd)/backend/tests:/app/tests" \
+      api python -m pytest tests/ -q
+
+  Frontend (Docker):
+    docker compose run --rm --no-deps web npx vitest run
+
+  Make:
+    make api-test
+    make api-test-auth   (auth + multi-tenant only)
+    make frontend-test
+
+Known Gaps / Next Steps
+- Google Drive sync is a stub (POST /api/sync/google-drive enqueues but does nothing)
+- No media/photo attachments
+- Cupping sessions (multi-taster scoring) not built
+- Paginated import for very large datasets
+- Frontend has partial test coverage (auth flow, NavBar, preferences, api client tested;
+  QuickLogBar, Beans edit mode, import/export flows not yet covered)
+- No admin tooling for managing users

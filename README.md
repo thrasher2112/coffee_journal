@@ -1,93 +1,196 @@
-# Coffee Journal Monorepo
+# Coffee Journal
 
-This repository contains the full Coffee Journal stack:
+A personal coffee brewing journal with passwordless authentication, multi-tenant data isolation, and a full security hardening pass.
 
-- **Backend** (`backend/`): FastAPI + SQLAlchemy 2.0 + Alembic, serving beans/brews/metrics/import-export APIs.
-- **Frontend** (`frontend/`): React + Vite + Tailwind PWA with Quick Brew logging, Beans library, All Cups archive, Best Cups, and Settings.
-- **Infrastructure**: Root `docker-compose.yml` to run Postgres, API, and Web, plus Makefile helpers.
+- **Backend**: FastAPI + SQLAlchemy 2.0 + Alembic + PostgreSQL (psycopg3)
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind — PWA with offline support
+- **Auth**: Magic link email → JWT in HttpOnly cookie (24h, session-revocable)
+- **Infrastructure**: Docker Compose (db + api + web) + Makefile helpers + GitHub Actions CI
+
+---
 
 ## Quick Start
 
 ```bash
-cp backend/.env.example backend/.env   # configure DB + URLs
-docker compose up --build              # boots db:5555->5432, api:8000, web:3000
+cp backend/.env.example backend/.env
+# Edit backend/.env: set JWT_SECRET to a random 32+ char string
+docker compose up --build
 ```
 
 Visit:
-- Frontend: <http://localhost:3000>
+- App: <http://localhost:3000>
 - API docs: <http://localhost:8000/docs>
+- Health check: <http://localhost:8000/health>
 
-The API container automatically runs migrations (`alembic upgrade head`) and seeds demo beans/brews.
+The API container automatically runs migrations and seeds demo beans/brews on first boot.
+
+---
+
+## Authentication
+
+Coffee Journal uses **magic link** (passwordless) auth:
+
+1. Enter your email at `/login`
+2. A sign-in link is printed to API container logs (dev) or sent via Resend (prod)
+3. Click the link → JWT session cookie is set → redirected to app
+
+To sign out, use the logout button — this **revokes all active sessions** via a token version bump.
+
+### Auth environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `JWT_SECRET` | `dev-secret-change-me` | **Must** be 32+ chars in production |
+| `JWT_EXPIRY_HOURS` | `24` | Session lifetime |
+| `COOKIE_SECURE` | `false` | Set `true` in production (HTTPS) |
+| `COOKIE_DOMAIN` | *(empty)* | Set to your domain in production |
+| `RESEND_API_KEY` | *(empty)* | Leave blank to log links to console |
+| `MAGIC_LINK_EXPIRY_MINUTES` | `15` | How long magic links stay valid |
+
+**Production guard**: if `DEBUG=false`, the app refuses to start without a strong `JWT_SECRET` and `COOKIE_SECURE=true`.
+
+---
 
 ## Repo Structure
+
 ```
 .
-├── AGENTS.md                 # contributor guide
-├── README.md                 # (this file)
-├── backend/                  # FastAPI backend + Alembic + tests
-├── frontend/                 # React/Vite PWA
-├── docs/STRUCTURE.md         # architecture overview
-├── docker-compose.yml        # orchestrates db + api + web
-└── Makefile                  # docker-up/down, migrate, seed, etc.
+├── backend/
+│   ├── src/coffee_journal/
+│   │   ├── main.py          # CORS, security headers, router mount
+│   │   ├── config.py        # Settings dataclass + production guards
+│   │   ├── auth.py          # Magic links, JWT creation/validation, session revocation
+│   │   ├── email.py         # Resend / console fallback
+│   │   ├── rate_limit.py    # Shared slowapi limiter (proxy-aware)
+│   │   ├── models/          # SQLAlchemy ORM (User, Bean, Brew, MagicLinkToken)
+│   │   ├── schemas/         # Pydantic v2 (input limits, validation)
+│   │   ├── crud/            # DB helpers (setattr allowlist, LIKE-escaped search)
+│   │   ├── routers/         # beans, brews, auth, metrics, data
+│   │   └── scripts/         # seed_db.py
+│   ├── alembic/versions/    # 9 migrations (latest: token_version on users)
+│   └── tests/               # 70 pytest tests (SQLite in-memory)
+├── frontend/
+│   └── src/
+│       ├── pages/           # Login, AuthVerify, Home, Beans, AllCups, BestCups, Settings
+│       ├── components/      # NavBar, ProtectedRoute, QuickLogBar, BrewCard, …
+│       ├── contexts/        # AuthContext, PreferencesContext
+│       ├── hooks/           # useLocalBrewStore
+│       └── lib/api.ts       # fetch wrapper + all API calls
+├── .github/workflows/ci.yml # Lint + test on PR
+├── docker-compose.yml
+├── docker-compose.override.yml  # dev mounts + hot-reload
+├── Makefile
+└── docs/
+    ├── STRUCTURE.md         # Architecture deep-dive
+    └── HANDOFF.txt          # Historical context
 ```
+
+---
 
 ## Common Tasks
 
-### Backend dev
+### Run tests
+
 ```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn coffee_journal.main:app --reload
-pytest          # backend tests (SQLite)
-alembic upgrade head
+# Backend (via Docker — tests dir is not in the image, must mount)
+docker compose run --rm --no-deps \
+  -v "$(pwd)/backend/tests:/app/tests" \
+  api python -m pytest tests/ -q
+
+# Frontend
+docker compose run --rm --no-deps web npx vitest run
+
+# Or use Make
+make api-test
+make frontend-test
 ```
 
-### Frontend dev
+### Lint
+
 ```bash
-cd frontend
-npm install
-npm run dev      # hot reload
-npm run build    # production bundle
+make lint
+# or: docker compose run --rm --no-deps api python -m ruff check src tests
 ```
 
-### Seeds & migrations
-- Apply migrations manually: `cd backend && alembic upgrade head`
-- Seed demo data: `python -m coffee_journal.scripts.seed_db`
+### Migrations
 
-### Useful Make targets
 ```bash
-make docker-up        # docker compose up -d
-make docker-down      # docker compose down
-make migrate          # alembic upgrade head (inside backend)
+make migrate
+# or: docker compose run --rm api alembic upgrade head
+```
+
+### Seed demo data
+
+```bash
+make seed
+# or: docker compose run --rm api python -m coffee_journal.scripts.seed_db
+```
+
+### Make targets
+
+```bash
+make docker-up        # docker compose up --build
+make docker-down      # docker compose down -v
+make migrate          # alembic upgrade head
 make seed             # run seed script
+make api-test         # pytest (all backend tests)
+make api-test-auth    # pytest auth + multi-tenant tests only
+make frontend-test    # vitest run
 make frontend-build   # npm run build
+make lint             # ruff check
 ```
+
+---
 
 ## Feature Highlights
-- Quick Brew now tracks brew style (pour over, Aeropress, French press) with Hoffmann ratios, per-style water/dose presets, grinder selection, and split sliders for overall/aroma/flavor scoring.
-- Advanced mode captures detailed brew data (water temp, bloom/total time, agitation timeline) with unit preferences (°C/°F) and default values that save automatically.
-- Beans library offers search, date filters, elevation (m), edit/copy/delete actions, usage metadata, plus average ratings fed by the richer brew logs.
-- All Cups lists every brew (newest first) while Best Cups spotlights ≥8 scores; Recent Brews cards render aroma tags, grinder details, and respect the chosen temperature unit.
-- Settings provides offline export/import, sync stubs, temperature-unit toggle, and full CRUD for personal grinder lists (used throughout Quick Brew).
 
-## Testing Notes
-- Backend: `pytest` (SQLite). Keep regression coverage for beans/brews changes.
-- Frontend: manual smoke tests (Quick Brew logging, Beans filters/edit, All Cups ordering). Automated UI tests are a TODO.
-- CI tip: run `npm run build` before shipping to catch TypeScript or bundler errors.
+- **Quick Brew**: brew style presets (pour over, Aeropress, French press) with Hoffmann ratios, grinder dropdown, °C/°F toggle, agitation timeline builder, split aroma/flavor/overall sliders
+- **Beans library**: search, date filters, elevation field, edit/copy/delete, usage metadata (first/last used, avg rating, brew count)
+- **All Cups / Best Cups**: full brew archive; Best Cups shows ≥8 rated brews with aroma tags and grinder details
+- **Settings**: JSON export/import (rate limited), offline vault sync, temperature unit preference, grinder management
+- **PWA**: offline-capable with service worker (API calls are never cached/intercepted)
 
-## Roadmap Snapshot
-- Authentication + multi-tenant safeguards
-- Drive sync implementation behind existing stub
-- Frontend automated tests (React Testing Library)
-- Enhanced import/export validation and pagination
+---
 
-For deeper details, see `backend/README.md`, `docs/STRUCTURE.md`, and `docs/HANDOFF.txt`.
+## Security
 
-## Publishing / GitHub Prep
+A full audit was completed covering 22 issues. Key hardening applied:
 
-- Copy only safe config: keep `.env` files local (already `.gitignore`d) and verify no secrets are committed via `rg` or tools like `detect-secrets`.
-- Run regression commands (`make api-test`, `make frontend-build`) before pushing so CI starts green.
-- Review `docs/HANDOFF.txt` for outstanding production-readiness work (auth, multitenancy, ops) and convert items into issues if you’re opening the repo.
-- Licensing: the repo now ships with the MIT License (`LICENSE` at repo root). Update the copyright line if
-  you need to attribute a specific organization.
+- Production config guards (startup crash if `JWT_SECRET` is weak or `COOKIE_SECURE` is off)
+- Session revocation — logout bumps `token_version`; old JWTs are rejected on next request
+- Magic link verify is `POST` (token in body, not URL/logs/history)
+- Cross-tenant IDOR fix — brew create/update verifies bean ownership
+- Input limits on all free-text and array fields
+- Rate limiting: magic-link (5/min), bean/brew create (30/min), import (5/min), export (10/min)
+- CORS restricted to explicit methods and `Content-Type` header only
+- Security headers on all responses (`X-Content-Type-Options`, `X-Frame-Options`, `CSP`, `Referrer-Policy`)
+- JWT `iss`/`aud` claims validated on decode
+- LIKE wildcard escaping in bean search
+- `setattr` allowlist on bean/brew update
+- Service worker never caches error responses or `/api/` requests
+
+---
+
+## Production Checklist
+
+- [ ] Set `JWT_SECRET` to a random 32+ character string
+- [ ] Set `COOKIE_SECURE=true`
+- [ ] Set `COOKIE_DOMAIN` to your domain
+- [ ] Set `DEBUG=false`
+- [ ] Configure `RESEND_API_KEY` (or accept console-logged links)
+- [ ] Set `FRONTEND_URL` and `API_URL` to your actual URLs
+- [ ] Change `POSTGRES_PASSWORD` from default
+- [ ] Run migrations before deploy: `alembic upgrade head`
+- [ ] Verify no `.env` files are committed (`git status`)
+
+---
+
+## CI
+
+GitHub Actions runs on every PR:
+- **backend-lint**: `ruff check`
+- **backend-test**: `pytest` (SQLite in-memory)
+- **frontend-test**: `vitest run`
+- **frontend-build**: `vite build` (TypeScript + bundler checks)
+
+See `.github/workflows/ci.yml`.
