@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional, Tuple
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -24,10 +23,10 @@ def list_brews(
     user_id: str,
     skip: int = 0,
     limit: int = 50,
-    bean_id: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-) -> Tuple[List[Brew], int]:
+    bean_id: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> tuple[list[Brew], int]:
     query = _base_brew_query(user_id)
     count_query = select(func.count()).select_from(Brew).where(Brew.user_id == user_id)
 
@@ -46,7 +45,7 @@ def list_brews(
     return items, total
 
 
-def get_brew(db: Session, brew_id: str, user_id: str) -> Optional[Brew]:
+def get_brew(db: Session, brew_id: str, user_id: str) -> Brew | None:
     brew = db.get(Brew, brew_id)
     if brew and brew.user_id != user_id:
         return None

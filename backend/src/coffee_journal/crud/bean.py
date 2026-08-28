@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional, Tuple
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import Bean, Brew
 
-RowType = Tuple[Bean, Optional[date], Optional[date], Optional[float], Optional[int]]
+RowType = tuple[Bean, date | None, date | None, float | None, int | None]
 
 
 def list_beans(
@@ -17,10 +16,10 @@ def list_beans(
     user_id: str,
     skip: int = 0,
     limit: int = 50,
-    q: Optional[str] = None,
-    first_used_after: Optional[date] = None,
-    last_used_before: Optional[date] = None,
-) -> Tuple[List[RowType], int]:
+    q: str | None = None,
+    first_used_after: date | None = None,
+    last_used_before: date | None = None,
+) -> tuple[list[RowType], int]:
     usage_stats = (
         select(
             Brew.bean_id.label("bean_id"),
@@ -79,7 +78,7 @@ def list_beans(
     return rows, total
 
 
-def get_bean(db: Session, bean_id: str, user_id: str) -> Optional[Bean]:
+def get_bean(db: Session, bean_id: str, user_id: str) -> Bean | None:
     bean = db.get(Bean, bean_id)
     if bean and bean.user_id != user_id:
         return None

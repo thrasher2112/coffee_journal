@@ -1,7 +1,7 @@
 """Shared rate limiter instance."""
 
-from starlette.requests import Request
 from slowapi import Limiter
+from starlette.requests import Request
 
 
 def _get_real_ip(request: Request) -> str:

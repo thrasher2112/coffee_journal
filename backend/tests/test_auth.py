@@ -1,7 +1,7 @@
 """Tests for authentication endpoints and flows."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from coffee_journal.models.magic_link_token import MagicLinkToken
 from coffee_journal.models.user import User
@@ -69,7 +69,7 @@ def test_verify_expired_token(client, db_session):
     token_row = db_session.query(MagicLinkToken).filter_by(email="expired@example.com").first()
 
     # Manually expire it
-    token_row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    token_row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
     db_session.commit()
 
     resp = client.post("/api/auth/verify", json={"token": token_row.token})
@@ -131,16 +131,20 @@ def test_logout_revokes_old_session(client, db_session):
     session_cookie = verify_resp.cookies.get("session")
     assert session_cookie
 
+    # Set the session cookie on the client instance (httpx 0.28 deprecated
+    # per-request `cookies=`); it is sent on all subsequent requests.
+    client.cookies.set("session", session_cookie)
+
     # Authenticated request works
-    me_resp = client.get("/api/auth/me", cookies={"session": session_cookie})
+    me_resp = client.get("/api/auth/me")
     assert me_resp.status_code == 200
 
     # Logout (bumps token_version)
-    logout_resp = client.post("/api/auth/logout", cookies={"session": session_cookie})
+    logout_resp = client.post("/api/auth/logout")
     assert logout_resp.status_code == 200
 
     # Re-use old session cookie — should be rejected
-    me_resp2 = client.get("/api/auth/me", cookies={"session": session_cookie})
+    me_resp2 = client.get("/api/auth/me")
     assert me_resp2.status_code == 401
     assert "revoked" in me_resp2.json()["detail"].lower()
 

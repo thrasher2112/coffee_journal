@@ -5,10 +5,12 @@ import os
 
 # Set DEBUG before any app imports so Settings.__post_init__ won't raise
 os.environ.setdefault("DEBUG", "true")
+# 32+ chars so pyjwt (>=2.10) doesn't emit InsecureKeyLengthWarning during tests
+os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-32-characters-min")
 
-from typing import Generator
-from pathlib import Path
 import sys
+from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,11 +23,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.append(str(SRC))
 
-from coffee_journal.auth import get_current_user  # noqa: E402
-from coffee_journal.db import Base, get_db  # noqa: E402
-from coffee_journal.main import app  # noqa: E402
-from coffee_journal.models.user import User  # noqa: E402
-from coffee_journal.rate_limit import limiter  # noqa: E402
+from coffee_journal.auth import get_current_user
+from coffee_journal.db import Base, get_db
+from coffee_journal.main import app
+from coffee_journal.models.user import User
+from coffee_journal.rate_limit import limiter
 
 engine = create_engine(
     "sqlite://",

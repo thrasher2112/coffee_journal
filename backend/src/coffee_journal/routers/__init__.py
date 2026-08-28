@@ -1,7 +1,7 @@
 """API routers."""
 from fastapi import APIRouter
 
-from . import auth, beans, brews, metrics, data
+from . import auth, beans, brews, data, metrics
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])

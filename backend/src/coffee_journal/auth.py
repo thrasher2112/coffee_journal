@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import jwt
@@ -17,7 +17,7 @@ from .models.user import User
 
 def cleanup_expired_tokens(db: Session) -> int:
     """Delete expired and used magic link tokens. Returns number of rows deleted."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     deleted = (
         db.query(MagicLinkToken)
         .filter(
@@ -32,7 +32,7 @@ def cleanup_expired_tokens(db: Session) -> int:
 def create_magic_link_token(db: Session, email: str) -> str:
     """Create a single-use magic link token for the given email."""
     token = secrets.token_hex(32)  # 64-char hex string
-    expires_at = datetime.now(timezone.utc) + timedelta(
+    expires_at = datetime.now(UTC) + timedelta(
         minutes=settings.magic_link_expiry_minutes
     )
     record = MagicLinkToken(email=email.lower().strip(), token=token, expires_at=expires_at)
@@ -62,7 +62,7 @@ def verify_magic_link_token(db: Session, token: str) -> User:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This link has already been used.",
         )
-    if record.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+    if record.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This link has expired.",
@@ -86,7 +86,7 @@ def verify_magic_link_token(db: Session, token: str) -> User:
 
 def create_session_jwt(user: User) -> str:
     """Create a signed JWT for the given user."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": user.id,
         "email": user.email,

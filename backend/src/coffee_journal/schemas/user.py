@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, EmailStr
 
@@ -18,5 +17,5 @@ class UserRead(BaseModel):
 
     id: str
     email: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     created_at: datetime
