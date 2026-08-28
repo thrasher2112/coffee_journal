@@ -1,8 +1,27 @@
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+/*
+ * Tailwind v4 is CSS-first: theme customization that used to live in
+ * tailwind.config.js now lives here as CSS custom properties in the
+ * `--color-*` / `--font-*` / `--shadow-*` namespaces. These generate the
+ * corresponding utility classes (bg-night, text-crema, font-display,
+ * shadow-card, etc.) exactly like `theme.extend` did in v3.
+ */
+@theme {
+  --color-night: #1b1614;
+  --color-espresso: #3b2924;
+  --color-crema: #f8f1e8;
+  --color-caramel: #c89c73;
+  --color-moss: #56645d;
+  --color-ember: #a8563c;
+
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  --shadow-card: 0 10px 35px rgba(0, 0, 0, 0.35);
+}
 
 :root {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

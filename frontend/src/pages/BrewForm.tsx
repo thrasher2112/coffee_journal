@@ -18,7 +18,13 @@ export function BrewFormPage() {
           Capture every dial-in detail. This view mirrors the quick log but defaults to richer controls for recipe development.
         </p>
       </header>
-      <QuickLogBar beans={beans} onSave={(draft) => createBrew(draft)} defaultBeanId={beans[0]?.id} />
+      <QuickLogBar
+        beans={beans}
+        onSave={async (draft) => {
+          await createBrew(draft);
+        }}
+        defaultBeanId={beans[0]?.id}
+      />
     </div>
   );
 }

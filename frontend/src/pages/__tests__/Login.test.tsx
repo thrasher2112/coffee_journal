@@ -30,9 +30,13 @@ describe('LoginPage', () => {
     vi.clearAllMocks();
   });
 
-  it('renders email input and submit button', () => {
+  it('renders email input and submit button', async () => {
     renderLogin();
-    expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
+    // AuthProvider kicks off an async checkAuth() call on mount; await the
+    // element via findBy (which polls inside act()) so that in-flight state
+    // update settles before we assert, instead of asserting synchronously
+    // against a still-pending effect.
+    expect(await screen.findByPlaceholderText('you@example.com')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send sign-in link/i })).toBeInTheDocument();
   });
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import type { User } from '../types';
 import { fetchCurrentUser, logoutUser, requestMagicLink, AuthError } from '../lib/api';
 
@@ -19,15 +19,27 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Tracks whether the provider is still mounted so that a state update
+  // triggered by an in-flight auth check can't fire after unmount (this
+  // also prevents React from warning about updates outside of act() when
+  // the component unmounts before checkAuth's promise settles, e.g. in tests).
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const checkAuth = useCallback(async () => {
     try {
       const currentUser = await fetchCurrentUser();
-      setUser(currentUser);
+      if (isMountedRef.current) setUser(currentUser);
     } catch (err) {
-      setUser(null);
+      if (isMountedRef.current) setUser(null);
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
     }
   }, []);
 

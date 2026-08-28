@@ -32,7 +32,15 @@ const DEFAULT_BLOOM_TIME = 45;
 const DEFAULT_BREW_TIME = 180;
 
 type BrewStyle = keyof typeof BREW_STYLE_PRESETS;
-type DraftForm = BrewDraft & {
+// Omit the numeric fields that allow a blank ('') input state before
+// re-adding them below — intersecting BrewDraft's plain `number` types
+// directly with a `number | ''` union would collapse back to `number`
+// (the empty-string member has no overlap with BrewDraft's type), silently
+// losing the "blank input" case these form fields rely on.
+type DraftForm = Omit<
+  BrewDraft,
+  'bean_weight_g' | 'water_weight_g' | 'water_temp_c' | 'bloom_time_s' | 'total_brew_time_s'
+> & {
   bean_weight_g: number | '';
   water_weight_g: number | '';
   water_temp_c?: number | '';
@@ -110,6 +118,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
   useEffect(() => {
     const preferredRatio = BREW_STYLE_PRESETS[brewStyle].ratios[0];
     setForm((prev) => {
+      if (prev.bean_weight_g === '' || prev.water_weight_g === '') {
+        return { ...prev, brew_style: brewStyle };
+      }
       const nextYield = Number((prev.bean_weight_g * preferredRatio).toFixed(1));
       const shouldUpdateYield = Math.abs(prev.water_weight_g - nextYield) >= 0.1;
       return {
