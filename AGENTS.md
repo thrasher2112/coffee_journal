@@ -27,6 +27,7 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
 │       ├── components/      # NavBar, ProtectedRoute, QuickLogBar, BrewCard, …
 │       ├── contexts/        # AuthContext, PreferencesContext
 │       ├── hooks/           # useLocalBrewStore
+│       ├── styles/index.css # Tailwind v4 @theme (replaces tailwind.config.js)
 │       └── lib/api.ts       # All API calls
 ├── .github/workflows/ci.yml # CI: lint + test + build
 ├── docker-compose.yml
@@ -74,7 +75,13 @@ make api-test
 make api-test-auth   # auth + multi-tenant only
 make frontend-test
 make lint            # ruff check
+
+# Natively (Python 3.12+ / Node 24+) — faster, and backend tests need no database
+cd backend  && python -m pytest tests/ -q
+cd frontend && npx vitest run
 ```
+
+Current baseline: **71 backend tests, 17 frontend tests**, ruff clean.
 
 Keep regression coverage when touching routers, CRUD helpers, or auth logic.
 
@@ -86,6 +93,14 @@ causing `PydanticUndefinedAnnotation` at startup. This applies to all files unde
 `routers/`. All other modules can use it freely.
 
 **Pydantic v2**: `Optional[T]` fields without `= None` are treated as required. Always add `= None`.
+
+**Never name a Pydantic field the same as the type it is annotated with.** In modules that use
+`from __future__ import annotations`, the class body's assignment shadows the imported type before
+Pydantic resolves the (string) annotation. `date: Optional[date] = None` silently resolves to
+`Optional[None]`, so the field rejects every real value with "Input should be None" — this shipped
+undetected in `BrewUpdate` and made `PUT /api/brews/{id}` unable to change a brew's date. Import the
+module instead and qualify the annotation (`import datetime as dt` → `dt.date`), as `schemas/brew.py`
+now does.
 
 **Rate limiter**: there is one shared `Limiter` in `rate_limit.py`. Never create a second instance
 in a router — import from `rate_limit` instead. In tests, `limiter.enabled = False` is set in
@@ -108,6 +123,9 @@ tests so each client has the correct user injected.
 
 - **Python**: Black/PEP8, SQLAlchemy 2.0 style, Pydantic v2 `model_validate`/`model_dump`
 - **TypeScript/React**: functional components, hooks, Tailwind utilities
+- **Tailwind v4 is CSS-first**: there is no `tailwind.config.js`. The theme (colors `night`,
+  `espresso`, `crema`, `caramel`, `moss`, `ember`; `font-display`/`font-body`; `shadow-card`)
+  lives in the `@theme` block of `frontend/src/styles/index.css`. Add new design tokens there.
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`)
 - When adding a field to Brew or Bean: wire it through the model, migration, schema, CRUD, router, and frontend types/API client
 

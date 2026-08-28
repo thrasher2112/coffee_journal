@@ -2,8 +2,8 @@
 
 A personal coffee brewing journal with passwordless authentication, multi-tenant data isolation, and a full security hardening pass.
 
-- **Backend**: FastAPI + SQLAlchemy 2.0 + Alembic + PostgreSQL (psycopg3)
-- **Frontend**: React 18 + TypeScript + Vite + Tailwind — PWA with offline support
+- **Backend**: Python 3.13 + FastAPI + SQLAlchemy 2.0 + Alembic + PostgreSQL (psycopg3)
+- **Frontend**: Node 24 + React 19 + TypeScript + Vite 8 + Tailwind 4 — PWA with offline support
 - **Auth**: Magic link email → JWT in HttpOnly cookie (24h, session-revocable)
 - **Infrastructure**: Docker Compose (db + api + web) + Makefile helpers + GitHub Actions CI
 
@@ -23,6 +23,29 @@ Visit:
 - Health check: <http://localhost:8000/health>
 
 The API container automatically runs migrations and seeds demo beans/brews on first boot.
+
+### Running natively (no Docker)
+
+Requires **Python 3.12+** and **Node 24+**, plus a PostgreSQL you point `DATABASE_URL` at.
+
+```bash
+# Backend
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+PYTHONPATH=src alembic upgrade head
+PYTHONPATH=src uvicorn coffee_journal.main:app --reload
+
+# Frontend (separate shell)
+cd frontend && npm install && npm run dev
+```
+
+Backend tests need no database — they run against SQLite in-memory:
+
+```bash
+cd backend && python -m pytest tests/ -q      # conftest adds src/ to sys.path
+cd frontend && npx vitest run
+```
 
 ---
 
@@ -46,6 +69,7 @@ To sign out, use the logout button — this **revokes all active sessions** via 
 | `COOKIE_DOMAIN` | *(empty)* | Set to your domain in production |
 | `RESEND_API_KEY` | *(empty)* | Leave blank to log links to console |
 | `MAGIC_LINK_EXPIRY_MINUTES` | `15` | How long magic links stay valid |
+| `SEED_USER_EMAIL` | `demo@coffeejournal.dev` | Account the seed data is attached to |
 
 **Production guard**: if `DEBUG=false`, the app refuses to start without a strong `JWT_SECRET` and `COOKIE_SECURE=true`.
 
@@ -68,7 +92,7 @@ To sign out, use the logout button — this **revokes all active sessions** via 
 │   │   ├── routers/         # beans, brews, auth, metrics, data
 │   │   └── scripts/         # seed_db.py
 │   ├── alembic/versions/    # 9 migrations (latest: token_version on users)
-│   └── tests/               # 70 pytest tests (SQLite in-memory)
+│   └── tests/               # 71 pytest tests (SQLite in-memory)
 ├── frontend/
 │   └── src/
 │       ├── pages/           # Login, AuthVerify, Home, Beans, AllCups, BestCups, Settings

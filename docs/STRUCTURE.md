@@ -68,6 +68,10 @@ All user-owned data (`Bean`, `Brew`) has a `user_id` FK; every CRUD query filter
 - Disabled in tests via `limiter.enabled = False` in `conftest.py`
 
 ### Schemas — `schemas/`
+`brew.py` imports `datetime as dt` and annotates `dt.date`/`dt.datetime`: a field named
+`date` would otherwise shadow a bare `from datetime import date` under postponed
+annotation evaluation and resolve to `Optional[None]`. See AGENTS.md.
+
 Input limits enforced at the Pydantic layer:
 - Bean text fields: `max_length=255` (name/roaster/origin), `max_length=5000` (notes)
 - Brew text fields: `max_length=5000` (tasting_notes), `max_length=2000` (grind_setting_notes)
@@ -103,10 +107,10 @@ Input limits enforced at the Pydantic layer:
 | `20260325_09` | Add `token_version` to users (session revocation) |
 
 ### Tests — `tests/`
-70 tests across:
+71 tests across:
 - `test_health.py` — health endpoint
 - `test_beans.py` — bean CRUD + search + filters
-- `test_brews.py` — brew CRUD
+- `test_brews.py` — brew CRUD (incl. `test_update_brew_date` regression)
 - `test_auth.py` — magic link flow, session cookies, logout + revocation
 - `test_multi_tenant.py` — cross-user isolation, IDOR checks
 - `test_config.py` — production guard behavior
@@ -123,7 +127,7 @@ docker compose run --rm --no-deps \
 
 ---
 
-## Frontend (React + Vite + Tailwind)
+## Frontend (React 19 + Vite 8 + Tailwind 4)
 
 ### Entry — `main.tsx`
 - Unregisters any stale service workers before registering the new one (prevents old SW from intercepting `/api/` calls)
@@ -148,9 +152,14 @@ All routes under `/` are wrapped in `ProtectedRoute` (redirects to `/login` if n
 3. `AuthContext.checkAuth()` calls `GET /api/auth/me`; if 401, clears auth state
 
 ### Service worker — `public/sw.js`
-- Cache version `v2`, auto-activates with `skipWaiting()` + `clients.claim()`
+- Cache version `v3`, auto-activates with `skipWaiting()` + `clients.claim()`
 - **Never intercepts `/api/` requests** (bypasses entirely)
 - Only caches `res.ok` responses (no error pages cached)
+
+### Styling — `styles/index.css`
+Tailwind v4 CSS-first: `@import 'tailwindcss'` plus an `@theme` block holding the palette
+(`night`, `espresso`, `crema`, `caramel`, `moss`, `ember`), fonts and `shadow-card`.
+There is no `tailwind.config.js`; PostCSS uses `@tailwindcss/postcss` (autoprefixer dropped).
 
 ### API client — `lib/api.ts`
 - `request<T>()` wrapper: adds `credentials: 'include'`, `Content-Type: application/json`; throws `AuthError` on 401
