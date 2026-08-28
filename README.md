@@ -69,7 +69,7 @@ To sign out, use the logout button — this **revokes all active sessions** via 
 | `COOKIE_DOMAIN` | *(empty)* | Set to your domain in production |
 | `RESEND_API_KEY` | *(empty)* | Leave blank to log links to console |
 | `MAGIC_LINK_EXPIRY_MINUTES` | `15` | How long magic links stay valid |
-| `SEED_USER_EMAIL` | `demo@coffeejournal.dev` | Account the seed data is attached to |
+| `SEED_USER_EMAIL` | *(empty)* | Address the sample data is attached to. **Unset = no seeding.** Use an address you control; it becomes a real loggable account |
 
 **Production guard**: if `DEBUG=false`, the app refuses to start without a strong `JWT_SECRET` and `COOKIE_SECURE=true`.
 
@@ -205,6 +205,7 @@ A full audit was completed covering 22 issues. Key hardening applied:
 - [ ] Set `FRONTEND_URL` and `API_URL` to your actual URLs
 - [ ] Change `POSTGRES_PASSWORD` from default
 - [ ] Run migrations before deploy: `alembic upgrade head`
+- [ ] Leave `SEED_USER_EMAIL` unset so no demo account is created
 - [ ] Verify no `.env` files are committed (`git status`)
 
 ---

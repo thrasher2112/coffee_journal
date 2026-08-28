@@ -138,6 +138,9 @@ tests so each client has the correct user injected.
 - New `setattr`-based update functions must use a field allowlist (`_BEAN_MUTABLE_FIELDS` / `_BREW_MUTABLE_FIELDS` pattern)
 - Search strings passed to LIKE must be escaped (see `crud/bean.py` for the pattern)
 - New endpoints that create or modify data should have a `@limiter.limit(...)` decorator
+- Never give an account-creating script a default email address. Sign-in is by magic
+  link, so any hardcoded address is an account whoever controls that domain's mailbox
+  can claim. `seed_db.py` requires `SEED_USER_EMAIL` and skips seeding when unset.
 
 ## Ops Notes
 

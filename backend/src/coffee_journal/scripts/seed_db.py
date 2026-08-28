@@ -10,9 +10,18 @@ from ..db import SessionLocal
 from ..models import Bean, Brew
 from ..models.user import User
 
-# Must be a deliverable-looking address: Pydantic's EmailStr rejects reserved
-# TLDs such as .local, so a seed user on one could never sign in via magic link.
-SEED_USER_EMAIL = os.getenv("SEED_USER_EMAIL", "demo@coffeejournal.dev")
+# Seeding is opt-in: there is deliberately NO default address.
+#
+# A hardcoded default would be an attackable identity. Seeding runs on every API
+# boot (see start.sh), so a default like "demo@example.dev" would create that
+# account on every deployment — and because sign-in is by magic link, whoever
+# controls that domain's mailbox could request a link and take the account over.
+# A reserved TLD (.local) is not an escape hatch either: EmailStr rejects it, so
+# the account exists but can never be signed in to, which is how the seed user
+# ended up unreachable in the first place.
+#
+# So: set SEED_USER_EMAIL to an address YOU control. Unset means no seeding.
+SEED_USER_EMAIL = os.getenv("SEED_USER_EMAIL", "").strip()
 
 SAMPLE_BEANS = [
     {
@@ -128,6 +137,12 @@ def seed(session: Session) -> None:
 
 
 def main() -> None:
+    if not SEED_USER_EMAIL:
+        print(
+            "SEED_USER_EMAIL is not set - skipping seed. "
+            "Set it to an email address you control to load the sample data."
+        )
+        return
     session = SessionLocal()
     try:
         seed(session)
