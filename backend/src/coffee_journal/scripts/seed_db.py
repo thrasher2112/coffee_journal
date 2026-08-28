@@ -1,6 +1,7 @@
 """Seed the database with sample beans and brews."""
 from __future__ import annotations
 
+import os
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -9,7 +10,9 @@ from ..db import SessionLocal
 from ..models import Bean, Brew
 from ..models.user import User
 
-SEED_USER_EMAIL = "demo@coffee-journal.local"
+# Must be a deliverable-looking address: Pydantic's EmailStr rejects reserved
+# TLDs such as .local, so a seed user on one could never sign in via magic link.
+SEED_USER_EMAIL = os.getenv("SEED_USER_EMAIL", "demo@coffeejournal.dev")
 
 SAMPLE_BEANS = [
     {
@@ -104,9 +107,9 @@ def seed(session: Session) -> None:
             session.refresh(bean)
             existing[bean.name] = bean
 
-    for brew_data in SAMPLE_BREWS:
-        bean_name = brew_data.pop("bean_name", None) or brew_data.pop("bean_name", None)
-        bean = existing.get(bean_name)
+    for sample in SAMPLE_BREWS:
+        brew_data = {k: v for k, v in sample.items() if k != "bean_name"}
+        bean = existing.get(sample["bean_name"])
         if not bean:
             continue
         has_brew = (
