@@ -13,6 +13,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
     "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
     "react": "^19.2.8",

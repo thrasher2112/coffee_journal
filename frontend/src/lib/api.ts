@@ -1,6 +1,10 @@
 import type { Bean, Brew, BrewDraft, MetricsOverview, User } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || (globalThis as any).__API_URL__ || 'http://localhost:8000';
+// Empty string = same-origin. Every path below already starts with `/api`, so an
+// empty base produces a relative request that follows whatever host the app was
+// loaded from. Set VITE_API_URL only when the API lives on a different origin.
+// `??` (not `||`) so an intentional empty string is not replaced by the fallback.
+const API_URL = import.meta.env.VITE_API_URL ?? (globalThis as any).__API_URL__ ?? '';
 
 class AuthError extends Error {
   constructor() {
@@ -9,14 +13,36 @@ class AuthError extends Error {
   }
 }
 
+/**
+ * The request never reached the API - offline, DNS failure, server asleep.
+ *
+ * Distinct from a request that arrived and was rejected: only this one means
+ * "try again later", so it is the only failure that should queue a brew for
+ * offline sync or keep a cached session alive. A 422 queued as if it were an
+ * outage would retry forever.
+ */
+export class NetworkError extends Error {
+  constructor(cause?: unknown) {
+    super('Network request failed');
+    this.name = 'NetworkError';
+    this.cause = cause;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    ...init
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      ...init
+    });
+  } catch (err) {
+    // fetch only rejects when the request could not be made at all.
+    throw new NetworkError(err);
+  }
   if (res.status === 401) {
     throw new AuthError();
   }

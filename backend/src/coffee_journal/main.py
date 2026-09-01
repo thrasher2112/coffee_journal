@@ -1,8 +1,14 @@
 """Entry point for the Coffee Journal API."""
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Request, Response
+import mimetypes
+import os
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
@@ -44,7 +50,15 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'"
+    # This header now covers the SPA itself, not just API JSON (see the static
+    # mount below). Fonts are self-hosted so 'self' is enough for them; data:/blob:
+    # cover the canvas charts and the JSON export download in Settings.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self'; "
+        "frame-ancestors 'none'"
+    )
     return response
 
 
@@ -60,3 +74,77 @@ def health(db: Session = Depends(get_db)):
     except Exception:  # noqa: BLE001 - we intentionally mask DB errors for health
         db_status = "degraded"
     return {"status": "ok", "database": db_status}
+
+
+# ---------------------------------------------------------------------------
+# Static SPA
+#
+# The production image builds the frontend and drops it here, so the API and the
+# app share one origin. That is what lets the session cookie stay SameSite=Lax
+# and keeps CORS out of the picture entirely.
+#
+# When the directory is absent - the local split setup, where vite serves the
+# frontend - none of this is installed and the app stays API-only.
+# ---------------------------------------------------------------------------
+
+# Not registered by default on every platform, and the bundled fonts are the
+# only thing serving them.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
+
+STATIC_DIR = Path(
+    os.getenv("STATIC_DIR", str(Path(__file__).resolve().parents[2] / "static"))
+)
+
+if (STATIC_DIR / "index.html").is_file():
+    _INDEX = STATIC_DIR / "index.html"
+    _ROOT = STATIC_DIR.resolve()
+    _NO_STORE = {"Cache-Control": "no-cache, max-age=0"}
+
+    if (STATIC_DIR / "assets").is_dir():
+        # Vite fingerprints these, so they are safe to cache indefinitely.
+        app.mount(
+            "/assets",
+            StaticFiles(directory=STATIC_DIR / "assets"),
+            name="assets",
+        )
+
+    def _static_file(path: str) -> Path | None:
+        """Resolve a URL path to a file inside STATIC_DIR, or None."""
+        if not path:
+            return None
+        candidate = (STATIC_DIR / path).resolve()
+        # Reject traversal: the resolved path must stay inside STATIC_DIR.
+        if candidate.is_file() and candidate.is_relative_to(_ROOT):
+            return candidate
+        return None
+
+    @app.exception_handler(404)
+    async def spa_fallback(request: Request, exc: HTTPException) -> Response:
+        """Serve the SPA for client-side routes and its root-level assets.
+
+        Deliberately a 404 handler rather than a catch-all route: a catch-all
+        matches before Starlette's own routing finishes, which silently turned
+        the trailing-slash redirect on e.g. `/api/brews` into a 404. This runs
+        only once real routing has already failed, so redirects and 405s behave
+        exactly as they do without a frontend attached.
+        """
+        path = request.url.path
+
+        # A miss under /api is a genuine miss and must stay JSON, never HTML.
+        if path == "/api" or path.startswith("/api/"):
+            return JSONResponse({"detail": exc.detail}, status_code=404)
+
+        if request.method not in ("GET", "HEAD"):
+            return JSONResponse({"detail": exc.detail}, status_code=404)
+
+        served = _static_file(path.lstrip("/"))
+        if served is not None:
+            # A pinned service worker is nearly impossible to dislodge from a
+            # phone, so never let it be cached.
+            if served.name == "sw.js":
+                return FileResponse(served, headers=_NO_STORE)
+            return FileResponse(served)
+
+        # Anything else is a client-side route: hand back the app shell.
+        return FileResponse(_INDEX, headers=_NO_STORE)

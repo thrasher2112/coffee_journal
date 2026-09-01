@@ -1,0 +1,13 @@
+# Shell scripts and Dockerfiles run inside Linux containers. Without this, a
+# Windows checkout (core.autocrlf=true) rewrites them with CRLF and the image
+# fails at startup with `env: 'bash\r': No such file or directory`.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+entrypoint* text eol=lf
+
+# Keep binary assets byte-exact.
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
