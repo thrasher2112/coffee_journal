@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { AromaTag, Bean, BrewDraft, FlavorTag } from '../types';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
@@ -269,7 +270,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
               <select
                 value={brewStyle}
                 onChange={(event) => setBrewStyle(event.target.value as BrewStyle)}
-                className="min-w-[170px] rounded-full border border-caramel/40 bg-espresso/60 px-3 py-1 text-crema text-sm normal-case"
+                className="min-h-11 min-w-[170px] rounded-full border border-caramel/40 bg-espresso/60 px-3 py-1 text-crema text-sm normal-case"
               >
                 {Object.entries(BREW_STYLE_PRESETS).map(([value, meta]) => (
                   <option key={value} value={value}>
@@ -282,15 +283,20 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
         </div>
         <div className="flex items-center gap-3 text-sm">
           <label className="flex items-center gap-2 text-moss">
-            <input type="checkbox" checked={isAdvanced} onChange={(e) => handleAdvancedToggle(e.target.checked)} />
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-ember"
+              checked={isAdvanced}
+              onChange={(e) => handleAdvancedToggle(e.target.checked)}
+            />
             Advanced mode
           </label>
-          <a href="/brew" className="text-xs uppercase tracking-[0.3em] text-caramel">
+          <Link to="/brew" className="inline-flex min-h-11 items-center justify-center min-h-11 text-xs uppercase tracking-[0.3em] text-caramel">
             Open full form
-          </a>
+          </Link>
           <button
             type="button"
-            className="text-caramel underline"
+            className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
             onClick={() => setForm(makeDraft(defaultBeanId, brewStyle, preferences.preferredGrinder))}
           >
             Reset

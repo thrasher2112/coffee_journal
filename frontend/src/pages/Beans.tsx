@@ -150,7 +150,7 @@ export function BeansPage() {
                   resetForm();
                 }
               }}
-              className={`rounded-full border px-4 py-2 text-sm ${
+              className={`inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-sm ${
                 isEditMode ? 'border-ember bg-ember/90 text-crema' : 'border-caramel/40 text-espresso'
               }`}
             >
@@ -189,10 +189,10 @@ export function BeansPage() {
             />
           </label>
           <div className="flex items-end gap-3">
-            <button type="submit" className="flex-1 rounded-full bg-ember py-2 text-crema">
+            <button type="submit" className="flex-1 min-h-11 rounded-full bg-ember py-2 text-crema">
               Apply filters
             </button>
-            <button type="button" onClick={handleClearFilters} className="rounded-full border border-caramel/40 px-4 py-2 text-sm">
+            <button type="button" onClick={handleClearFilters} className="inline-flex min-h-11 items-center justify-center rounded-full border border-caramel/40 px-4 py-2 text-sm">
               Clear
             </button>
           </div>
