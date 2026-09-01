@@ -119,6 +119,28 @@ not by counting cascaded row deletions.
 **dependency_overrides is global**: use the `make_client(user)` factory fixture for multi-tenant
 tests so each client has the correct user injected.
 
+**Never put a catch-all route in front of the API.** The SPA fallback in `main.py` is a
+`@app.exception_handler(404)`, not a `@app.get("/{full_path:path}")`. A catch-all matches
+during routing, before Starlette's `redirect_slashes` runs, which silently turned the 307 on
+`/api/brews` → `/api/brews/` into a 404 (GET) and a 405 (POST). The frontend happened to use
+trailing slashes so nothing broke visibly. A 404 handler runs only after routing has already
+failed, so redirects and 405s behave exactly as they do with no frontend attached.
+
+**The CSP now covers the SPA, not just API JSON.** `main.py` sends
+`default-src 'self'` on every response, including the app HTML the API serves. Any CDN asset
+is blocked outright with no visible error - this is why fonts are self-hosted via
+`@fontsource/*` in `main.tsx` rather than imported from Google Fonts. Bundle new assets;
+do not loosen the header.
+
+**The frontend API base must stay relative.** `api.ts` defaults `API_URL` to `''` so requests
+go to `/api/...` on whatever origin served the app. Setting `VITE_API_URL` bakes an absolute
+host into the bundle at build time, which is what made earlier builds work only on the machine
+that built them. Use it only for a genuinely split-origin deploy.
+
+**Shell scripts must stay LF.** `.gitattributes` forces `eol=lf` on `*.sh` and `Dockerfile`.
+Without it a Windows checkout (`core.autocrlf=true`) rewrites `start.sh` with CRLF and the
+container dies at startup with `env: 'bash': No such file or directory`.
+
 ## Coding Standards
 
 - **Python**: Black/PEP8, SQLAlchemy 2.0 style, Pydantic v2 `model_validate`/`model_dump`
@@ -149,3 +171,8 @@ tests so each client has the correct user injected.
 - `docker compose down -v` drops the Postgres volume — data is lost
 - `JWT_EXPIRY_HOURS=24` by default; the dev `.env.example` leaves it at 24
 - In production: set `DEBUG=false`, `JWT_SECRET` (32+ chars), `COOKIE_SECURE=true`, `COOKIE_DOMAIN`
+- Production is the **root `Dockerfile`**: one container, node builds the SPA into `/app/static`
+  and FastAPI serves it same-origin. `docker-compose` still uses the split
+  `backend/`+`frontend/` Dockerfiles for local dev — do not conflate the two.
+- `start.sh` honours `$PORT` (managed hosts inject it) and passes `--proxy-headers`, without
+  which the app cannot see the TLS terminator's original https scheme.

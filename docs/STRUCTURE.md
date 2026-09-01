@@ -130,7 +130,8 @@ docker compose run --rm --no-deps \
 ## Frontend (React 19 + Vite 8 + Tailwind 4)
 
 ### Entry — `main.tsx`
-- Unregisters any stale service workers before registering the new one (prevents old SW from intercepting `/api/` calls)
+- Imports the self-hosted `@fontsource/*` faces (the CSP the API serves the app under blocks the Google Fonts CDN, and bundled fonts survive going offline)
+- Registers `/sw.js`. It used to unregister every worker first, which left the page uncontrolled on most loads; `sw.js` skips `/api/` itself, so the workaround was obsolete
 - Mounts `App` inside `AuthProvider` + `PreferencesProvider`
 
 ### Routing — `App.tsx`
@@ -149,12 +150,14 @@ All routes under `/` are wrapped in `ProtectedRoute` (redirects to `/login` if n
 ### Auth flow
 1. `AuthVerifyPage` extracts `?token=` from URL, POSTs it to `POST /api/auth/verify` (token in JSON body — never in URL to backend)
 2. Backend sets `session` HttpOnly cookie
-3. `AuthContext.checkAuth()` calls `GET /api/auth/me`; if 401, clears auth state
+3. `AuthContext.checkAuth()` calls `GET /api/auth/me`. A real 401 (`AuthError`) clears auth state; an unreachable API (`NetworkError`) instead falls back to the identity cached in `localStorage`, so launching the installed app offline opens the journal rather than the login screen. That cache is display-only — the session is still the HttpOnly cookie and every call is authorised server-side.
 
 ### Service worker — `public/sw.js`
-- Cache version `v3`, auto-activates with `skipWaiting()` + `clients.claim()`
-- **Never intercepts `/api/` requests** (bypasses entirely)
-- Only caches `res.ok` responses (no error pages cached)
+- Cache version `v4`, auto-activates with `skipWaiting()` + `clients.claim()`
+- **Never intercepts `/api/` requests** (bypasses entirely) — now that the API shares the app's origin, this check is what keeps live data out of the shell cache
+- At install, precaches the shell *and* parses `index.html` for the hashed `/assets/*` bundles; without them a first-ever offline launch renders an empty `<div id="root">`
+- Navigations are network-first, falling back to the cached `index.html`, so client-side routes like `/beans` work offline (they have no file of their own)
+- Everything else is cache-first; only `res.ok` responses are cached (no error pages)
 
 ### Styling — `styles/index.css`
 Tailwind v4 CSS-first: `@import 'tailwindcss'` plus an `@theme` block holding the palette
@@ -167,6 +170,17 @@ There is no `tailwind.config.js`; PostCSS uses `@tailwindcss/postcss` (autoprefi
 - Data functions: `fetchBeans`, `createBean`, `updateBean`, `deleteBean`, `copyBean`
 - Brew functions: `fetchBrews`, `createBrew`
 - Util: `syncBrews` (flushes offline queue)
+- `NetworkError` marks a request that never reached the API, as distinct from one that arrived and was rejected. Only the former should queue a brew or keep a cached session — a 422 queued as an outage would retry forever.
+- `API_URL` defaults to `''` (same origin). See AGENTS.md before setting `VITE_API_URL`.
+
+### Offline sync — `hooks/useBrewSync.ts`
+- `useBrewSync()` is the single flush path, shared by Settings' "Sync now" button and the automatic flush
+- `useAutoSync()` (mounted in `AuthenticatedLayout`) drains the queue on the `online` event, on tab focus, and on mount — previously syncing only ever happened if you remembered to open Settings and press the button
+- Drafts with no `bean_id` can never be accepted by the API; they are reported back rather than silently dropped from the queue
+
+### Navigation — `components/NavBar.tsx`
+- Above `md`: the sticky header nav (`aria-label="Primary"`)
+- Below `md`: a fixed bottom tab bar (`aria-label="Bottom navigation"`) with safe-area padding. The header nav is `display:none` there, so before this bar existed a phone had no navigation at all
 
 ---
 

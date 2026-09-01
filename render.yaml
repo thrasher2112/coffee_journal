@@ -1,0 +1,39 @@
+# Render blueprint for the single-container deploy.
+#
+# The database is deliberately NOT defined here: Render's own free Postgres
+# expires, so point DATABASE_URL at a Neon free database instead (it does not).
+#
+# Two values can only be filled in after Render assigns the service its URL, so
+# the first deploy is a two-step - see "Deploying" in README.md.
+services:
+  - type: web
+    name: coffee-journal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Neon connection string, rewritten to the psycopg3 driver:
+      #   postgresql+psycopg://USER:PASSWORD@HOST/DB?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # Must be 32+ chars or the app refuses to boot. Generate with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: JWT_SECRET
+        sync: false
+      # Both are this service's own https URL, with no trailing slash. The app
+      # is single-origin, so they are the same value.
+      - key: FRONTEND_URL
+        sync: false
+      - key: API_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        value: Coffee Journal <onboarding@resend.dev>
+      - key: COOKIE_SECURE
+        value: "true"
+      # DEBUG and SEED_USER_EMAIL are intentionally absent. DEBUG unset keeps
+      # the production config guards armed; SEED_USER_EMAIL unset means no
+      # account is ever auto-created on a public deployment.

@@ -30,7 +30,7 @@ def send_magic_link_email(to_email: str, token: str) -> None:
     safe_url = html.escape(verify_url)
     resend.Emails.send(
         {
-            "from": "Coffee Journal <noreply@updates.coffeejournal.app>",
+            "from": settings.resend_from,
             "to": [to_email],
             "subject": "Sign in to Coffee Journal",
             "html": (

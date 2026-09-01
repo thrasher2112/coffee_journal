@@ -195,16 +195,64 @@ A full audit was completed covering 22 issues. Key hardening applied:
 
 ---
 
+## Deploying (and using it on a phone)
+
+Production runs as **one container serving both the API and the built SPA** from
+a single origin (root `Dockerfile`). That is not just tidiness:
+
+- the session cookie stays `SameSite=Lax`, which a split frontend/API deploy
+  would break;
+- CORS stops mattering;
+- the frontend bundle needs no baked-in API host - it calls relative `/api`
+  paths against whatever origin served it. The old build froze
+  `http://localhost:8000` into the bundle, which is why it only ever worked on
+  the machine that built it.
+
+Local development is unaffected: `docker compose up` still builds the split
+backend/frontend images so vite HMR and `uvicorn --reload` keep working.
+
+### One-time setup
+
+1. **Database** - create a free [Neon](https://neon.tech) Postgres. Rewrite the
+   connection string it gives you to the psycopg3 driver:
+   `postgresql://...` becomes `postgresql+psycopg://...`, keeping
+   `?sslmode=require`. Migrations run automatically on every boot
+   (`backend/start.sh`), so the schema builds itself.
+2. **App** - point Render at this repo; `render.yaml` describes the service.
+   Fill in the env vars it marks `sync: false`.
+3. **First deploy is two steps**: `FRONTEND_URL` and `API_URL` must be the URL
+   Render assigns, which you only learn after the service exists. Deploy, copy
+   the `https://...onrender.com` URL into both (no trailing slash), redeploy.
+   Until then, magic-link emails will point at the wrong host.
+4. **Email** - add a `RESEND_API_KEY`. Without one the app still "works" but
+   prints the sign-in link to the logs instead of emailing it, which reads as a
+   silent failure. `RESEND_FROM` defaults to Resend's test sender, which needs
+   no domain verification but only delivers to your own Resend account address -
+   fine for a personal journal, not for inviting anyone else.
+5. **Move your data across** - no export tooling needed: use Settings →
+   Export / Import on the local instance, then import on the deployed one.
+
+The free Render instance sleeps after ~15 minutes idle and takes ~50s to wake.
+The service worker still paints the app shell instantly and the offline queue
+accepts a brew regardless, so it mostly hides. If it stops being tolerable,
+Cloud Run or Fly.io cold-start in a few seconds instead.
+
+### Installing on a phone
+
+Open the deployed URL and use "Add to Home Screen" (iOS) or "Install app"
+(Android). It then runs standalone, and brews logged with no signal are queued
+in `localStorage` and flushed automatically when the connection returns.
+
 ## Production Checklist
 
-- [ ] Set `JWT_SECRET` to a random 32+ character string
-- [ ] Set `COOKIE_SECURE=true`
-- [ ] Set `COOKIE_DOMAIN` to your domain
-- [ ] Set `DEBUG=false`
+- [ ] Set `JWT_SECRET` to a random 32+ character string (the app refuses to boot otherwise)
+- [ ] Set `COOKIE_SECURE=true` (likewise enforced at boot)
+- [ ] Set `COOKIE_DOMAIN` to your domain (only needed for a multi-subdomain setup)
+- [ ] Leave `DEBUG` unset so the production config guards stay armed
 - [ ] Configure `RESEND_API_KEY` (or accept console-logged links)
-- [ ] Set `FRONTEND_URL` and `API_URL` to your actual URLs
-- [ ] Change `POSTGRES_PASSWORD` from default
-- [ ] Run migrations before deploy: `alembic upgrade head`
+- [ ] Set `FRONTEND_URL` and `API_URL` to the deployed URL, no trailing slash
+- [ ] Leave `VITE_API_URL` unset - the single-origin build wants a relative base
+- [ ] Change `POSTGRES_PASSWORD` from default (self-hosted Postgres only)
 - [ ] Leave `SEED_USER_EMAIL` unset so no demo account is created
 - [ ] Verify no `.env` files are committed (`git status`)
 

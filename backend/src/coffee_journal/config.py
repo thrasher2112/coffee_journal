@@ -22,6 +22,13 @@ class Settings:
     jwt_secret: str = os.getenv("JWT_SECRET", "dev-secret-change-me")
     jwt_expiry_hours: int = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
+    # Resend refuses any sender on a domain the account has not verified.
+    # "onboarding@resend.dev" is their shared test sender and is allowed
+    # without verification, but can only deliver to the Resend account's
+    # own address - which is exactly the single-user case here.
+    resend_from: str = os.getenv(
+        "RESEND_FROM", "Coffee Journal <onboarding@resend.dev>"
+    )
     magic_link_expiry_minutes: int = int(
         os.getenv("MAGIC_LINK_EXPIRY_MINUTES", "15")
     )
