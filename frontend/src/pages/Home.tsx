@@ -5,7 +5,7 @@ import { QuickLogBar } from '../components/QuickLogBar';
 import { BrewCard } from '../components/BrewCard';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
 import type { Bean, Brew, MetricsOverview, BrewDraft } from '../types';
-import { createBrew, fetchBeans, fetchBrews, fetchMetrics } from '../lib/api';
+import { createBrew, fetchBeans, fetchBrews, fetchMetrics, NetworkError } from '../lib/api';
 import { SAMPLE_BEANS, SAMPLE_BREWS, SAMPLE_METRICS } from '../lib/sampleData';
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler);
@@ -41,9 +41,18 @@ export function HomePage() {
     try {
       await createBrew(draft);
       await load();
+      setError(null);
     } catch (err) {
-      console.warn('Saving locally', err);
-      addBrew(draft);
+      // Only queue when the request never landed. A rejected payload (422) or a
+      // dead session (401) would otherwise sit in the queue retrying forever.
+      if (err instanceof NetworkError) {
+        console.warn('Offline - queued locally', err);
+        addBrew(draft);
+        setError('Offline — brew saved locally and will sync when you reconnect.');
+      } else {
+        console.error('Failed to save brew', err);
+        setError('Could not save that brew. Check the values and try again.');
+      }
     }
   };
 

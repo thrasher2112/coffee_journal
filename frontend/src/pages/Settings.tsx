@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { ExportImportModal } from '../components/ExportImportModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
-import { importData, syncBrews } from '../lib/api';
-import type { BrewDraft } from '../types';
+import { importData } from '../lib/api';
+import { useBrewSync } from '../hooks/useBrewSync';
 import { TemperatureUnit, usePreferences } from '../contexts/PreferencesContext';
 
 export function SettingsPage() {
   const { user, logout } = useAuth();
-  const { brews, unsynced, markSynced, importLocal } = useLocalBrewStore();
+  const { brews, unsynced, importLocal } = useLocalBrewStore();
+  const { syncNow } = useBrewSync();
   const [modalOpen, setModalOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const { preferences, setPreference, addGrinder, removeGrinder, setPreferredGrinder } = usePreferences();
@@ -43,27 +44,18 @@ export function SettingsPage() {
       return;
     }
     setStatus('Syncing...');
-    try {
-      const queue = unsynced
-        .filter((brew) => Boolean(brew.bean_id))
-        .map(({ local_id, synced, created_at, ...rest }) => ({
-          payload: {
-            ...rest,
-            bean_id: rest.bean_id!,
-            agitation_events: rest.agitation_events
-          } as BrewDraft,
-          localId: local_id
-        }));
-      if (!queue.length) {
-        setStatus('Add a bean before syncing drafts.');
-        return;
-      }
-      await syncBrews(queue.map((item) => item.payload));
-      markSynced(queue.map((item) => item.localId));
-      setStatus('Synced with API.');
-    } catch (error) {
-      setStatus('Sync failed, remain offline.');
+    const { synced, needsBean, failed } = await syncNow();
+
+    if (failed) {
+      setStatus('Sync failed - still offline.');
+      return;
     }
+    // Drafts with no bean can never be accepted by the API. Say so instead of
+    // leaving them stuck in the queue with no explanation.
+    const blocked = needsBean
+      ? ` ${needsBean} draft${needsBean === 1 ? '' : 's'} still need a bean before they can sync.`
+      : '';
+    setStatus(synced ? `Synced ${synced} brew${synced === 1 ? '' : 's'}.${blocked}` : blocked.trim() || 'Nothing to sync.');
   };
 
   const handleServerImport = async () => {
@@ -121,13 +113,13 @@ export function SettingsPage() {
           <span>Unsynced: {unsynced.length}</span>
         </div>
         <div className="mt-4 flex flex-wrap gap-3">
-          <button className="rounded-full bg-ember px-4 py-2 text-sm text-crema" onClick={handleSync}>
+          <button className="inline-flex min-h-11 items-center justify-center rounded-full bg-ember px-4 py-2 text-sm text-crema" onClick={handleSync}>
             Sync now
           </button>
-          <button className="rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel" onClick={() => setModalOpen(true)}>
+          <button className="inline-flex min-h-11 items-center justify-center rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel" onClick={() => setModalOpen(true)}>
             Export / Import
           </button>
-          <button className="rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel" onClick={handleServerImport}>
+          <button className="inline-flex min-h-11 items-center justify-center rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel" onClick={handleServerImport}>
             Push snapshot to API
           </button>
         </div>
@@ -143,7 +135,7 @@ export function SettingsPage() {
                 key={unit}
                 type="button"
                 onClick={() => handleTemperatureUnitChange(unit)}
-                className={`rounded-full border px-4 py-2 text-sm transition ${
+                className={`inline-flex min-h-11 items-center justify-center rounded-full border px-4 py-2 text-sm transition ${
                   active
                     ? 'border-ember bg-ember text-crema'
                     : 'border-caramel/50 bg-transparent text-espresso'
@@ -168,7 +160,7 @@ export function SettingsPage() {
             placeholder="Add grinder name"
             className="flex-1 rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-sm text-crema min-w-[220px]"
           />
-          <button type="button" className="rounded-full bg-ember px-4 py-2 text-sm text-crema" onClick={handleAddGrinder}>
+          <button type="button" className="inline-flex min-h-11 items-center justify-center rounded-full bg-ember px-4 py-2 text-sm text-crema" onClick={handleAddGrinder}>
             Add grinder
           </button>
         </div>
@@ -184,6 +176,7 @@ export function SettingsPage() {
                   <input
                     type="radio"
                     name="preferred-grinder"
+                    className="h-5 w-5 accent-ember"
                     checked={active}
                     onChange={() => setPreferredGrinder(grinder)}
                   />
@@ -191,7 +184,7 @@ export function SettingsPage() {
                 </div>
                 <button
                   type="button"
-                  className="text-xs uppercase tracking-[0.3em] text-caramel"
+                  className="inline-flex min-h-11 items-center justify-center min-w-11 px-2 text-xs uppercase tracking-[0.3em] text-caramel"
                   onClick={() => handleRemoveGrinder(grinder)}
                 >
                   Remove
@@ -209,7 +202,7 @@ export function SettingsPage() {
         <button
           type="button"
           onClick={logout}
-          className="rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel"
+          className="inline-flex min-h-11 items-center justify-center rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel"
         >
           Sign out
         </button>

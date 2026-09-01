@@ -13,6 +13,9 @@ vi.mock('../../lib/api', () => ({
   AuthError: class AuthError extends Error {
     constructor() { super('Not authenticated'); this.name = 'AuthError'; }
   },
+  NetworkError: class NetworkError extends Error {
+    constructor() { super('Network request failed'); this.name = 'NetworkError'; }
+  },
 }));
 
 function renderLogin() {
