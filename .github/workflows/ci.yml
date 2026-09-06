@@ -1,10 +1,11 @@
 name: CI
 
 on:
+  # Feature branches were previously unchecked: CI only ran once work reached
+  # main, which is exactly too late for it to catch anything.
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**', 'chore/**']
   pull_request:
-    branches: [main]
 
 jobs:
   backend-lint:
