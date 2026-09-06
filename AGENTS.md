@@ -171,6 +171,10 @@ container dies at startup with `env: 'bash
   boolean for an id the caller already supplied and reads no row data. Do not generalise it.
 - Search strings passed to LIKE must be escaped (see `crud/bean.py` for the pattern)
 - New endpoints that create or modify data should have a `@limiter.limit(...)` decorator
+- `start.sh` passes `--proxy-headers --forwarded-allow-ips` ONLY when `TRUSTED_PROXY_HOPS > 0`.
+  Passing it unconditionally lets uvicorn rewrite `scope["client"]` from a caller-supplied
+  header, which made `_get_real_ip`'s fallback attacker-controlled and bypassed every limit
+  at the default `TRUSTED_PROXY_HOPS=0`. Verified by rotating the header against both settings
 - Rate limiting keys on `X-Forwarded-For` read from the RIGHT (`rate_limit._get_real_ip`),
   and only as many hops as `TRUSTED_PROXY_HOPS` says actually exist. Proxies append, so the
   leftmost entry is caller-supplied: reading it (as this once did) let anyone mint a fresh
