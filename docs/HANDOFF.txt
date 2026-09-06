@@ -60,8 +60,9 @@ Known Gaps / Next Steps
 - No media/photo attachments
 - Cupping sessions (multi-taster scoring) not built
 - Paginated import for very large datasets
-- Frontend has partial test coverage (auth flow, NavBar, preferences, api client tested;
-  QuickLogBar, Beans edit mode, import/export flows not yet covered)
+- Frontend has partial test coverage (auth flow + offline session fallback, NavBar incl.
+  the mobile tab bar, preferences, local brew store, api client tested; QuickLogBar,
+  Beans edit mode, import/export flows and the service worker not yet covered)
 - No admin tooling for managing users
 
 
@@ -113,3 +114,87 @@ Known gaps (carried forward + new)
   no admin tooling; frontend coverage still misses QuickLogBar / Beans edit /
   import-export flows.
 
+
+================================================================
+Mobile / PWA + Deploy Pass (2026-09-06)
+================================================================
+
+Goal: make the app installable and usable on a phone, and deployable to a free
+host. Branch: feat/mobile-pwa.
+
+Architecture change - single origin
+- Production is now the ROOT Dockerfile: node builds the SPA, FastAPI serves it
+  from /app/static alongside /api. One container, one URL.
+- Why: the frontend used to bake VITE_API_URL into the bundle at build time,
+  defaulting to http://localhost:8000 - unusable anywhere but the build machine.
+  The API base is now relative (''). Single origin also keeps the session cookie
+  on SameSite=Lax and removes CORS.
+- docker-compose still builds the split backend/frontend images for local dev,
+  so vite HMR and uvicorn --reload are unchanged. Do not conflate the two.
+- The SPA fallback is a 404 exception handler, NOT a catch-all route. A
+  catch-all matches before Starlette's redirect_slashes and silently turned the
+  307 on /api/brews into a 404/405.
+- The CSP (default-src 'self') now covers the app HTML, so the Google Fonts CDN
+  is blocked. Fonts are self-hosted via @fontsource - this also makes them work
+  offline. Do not loosen the header; bundle new assets instead.
+
+PWA
+- Added icon set (192/512/maskable-512/apple-touch/favicon-32) generated from
+  frontend/public/icon.svg in the brand palette. Chrome needs >=192px PNG before
+  it offers "Install app"; the old manifest had only a 64px .ico.
+- manifest.json gained id/scope/orientation/description; start_url is "/".
+- index.html gained the apple-mobile-web-app-* tags (iOS ignores the manifest
+  for home-screen installs), theme-color, and viewport-fit=cover.
+
+Mobile UI
+- NavBar now renders a fixed bottom tab bar below md with safe-area padding.
+  Previously the nav was `hidden md:flex` with NO replacement, so a phone could
+  not reach Beans / All Cups / Best Cups / Settings, nor sign out.
+- Touch targets raised to min-h-11; body uses 100dvh; background-attachment
+  fixed removed (full repaint per scroll frame on iOS).
+
+Offline
+- api.ts throws NetworkError when a request never reached the API, distinct from
+  one that arrived and was rejected. Only NetworkError queues a brew or keeps a
+  cached session - a 422 queued as an outage would retry forever.
+- AuthContext caches the last known identity in localStorage so an offline
+  launch opens the journal instead of the login screen. Display-only: the
+  session is still the HttpOnly cookie and every call is authorised server-side.
+- useBrewSync/useAutoSync flush the queue on the online event, tab focus and
+  mount. Previously syncing only happened via a manual button in Settings.
+- sw.js v4: network-first navigations with an index.html fallback (client-side
+  routes have no file of their own), and install now parses index.html for the
+  hashed bundles - without them a first offline launch rendered an empty root.
+
+Deploy
+- render.yaml describes a free Render web service. No database in it on purpose:
+  Render's free Postgres expires, Neon's does not.
+- start.sh honours $PORT and passes --proxy-headers (needed to see the TLS
+  terminator's original https scheme).
+- config.normalize_database_url pins psycopg3 onto a bare postgresql:// URL, so
+  a provider connection string can be pasted in verbatim.
+- RESEND_FROM replaces a hardcoded sender on a domain we do not own (Resend
+  would have rejected every send).
+- .gitattributes pins *.sh to LF. A Windows checkout otherwise rewrites start.sh
+  with CRLF and the container dies with: env: 'bash': No such file or directory
+
+Bugs fixed
+- import_data reused row ids that belong to another user -> 500. Reachable from
+  the documented export/import migration. Now only replaces a genuinely taken
+  id, keeping free ids so a repeat import is idempotent.
+- Quick Log was an in-page anchor that did nothing off the home route.
+- "Open full form" was a bare <a href> causing a full page reload.
+- Home NavLink lacked `end`, so Home rendered active on every route.
+
+Verified
+- 78 backend tests, 22 frontend tests, ruff clean, tsc clean, prod build clean.
+- The production image was run against a throwaway Neon branch and exercised end
+  to end (auth, CRUD, multi-tenancy, export/import, PWA assets, CSP, redirects).
+
+Known gaps from this pass
+- Migration 20260325_08 creates legacy@coffee-journal.local on EVERY database,
+  including fresh ones. Inert - EmailStr rejects the reserved TLD so no magic
+  link can be requested - but it is noise, and the UUID is predictable
+  (...0001). Cleaning it up means a new migration; not done here.
+- Importing ANOTHER user's export twice still duplicates (ids are remapped each
+  time). Only your own export is idempotent. Would need a natural key to fix.
