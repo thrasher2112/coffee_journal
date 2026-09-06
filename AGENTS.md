@@ -171,6 +171,11 @@ container dies at startup with `env: 'bash
   boolean for an id the caller already supplied and reads no row data. Do not generalise it.
 - Search strings passed to LIKE must be escaped (see `crud/bean.py` for the pattern)
 - New endpoints that create or modify data should have a `@limiter.limit(...)` decorator
+- Rate limiting keys on `X-Forwarded-For` read from the RIGHT (`rate_limit._get_real_ip`),
+  and only as many hops as `TRUSTED_PROXY_HOPS` says actually exist. Proxies append, so the
+  leftmost entry is caller-supplied: reading it (as this once did) let anyone mint a fresh
+  bucket per request and made every `@limiter.limit` decorative. Never raise
+  `TRUSTED_PROXY_HOPS` above the real proxy count
 - Never give an account-creating script a default email address. Sign-in is by magic
   link, so any hardcoded address is an account whoever controls that domain's mailbox
   can claim. `seed_db.py` requires `SEED_USER_EMAIL` and skips seeding when unset.

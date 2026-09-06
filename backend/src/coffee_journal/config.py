@@ -59,6 +59,14 @@ class Settings:
     }
     cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
 
+    # How many proxies sit in front of the app and append to X-Forwarded-For.
+    # 0 (the default) means the app is reached directly, so that header is
+    # attacker-controlled input and is ignored for rate limiting. Render adds
+    # exactly one hop; a CDN in front of it would make this 2. Setting this
+    # higher than the real hop count lets callers forge their rate-limit
+    # identity, so it must match the deployment.
+    trusted_proxy_hops: int = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
+
     def __post_init__(self):
         self.database_url = normalize_database_url(self.database_url)
         if not self.debug:

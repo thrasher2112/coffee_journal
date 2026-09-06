@@ -40,6 +40,12 @@ services:
         value: Coffee Journal <onboarding@resend.dev>
       - key: COOKIE_SECURE
         value: "true"
+      # Render terminates TLS and appends exactly one entry to X-Forwarded-For.
+      # Rate limiting reads that hop as the client identity. Leave it at the
+      # real hop count: setting it higher lets callers forge the header and
+      # bypass every limit, including the one on magic-link email.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
       # DEBUG and SEED_USER_EMAIL are intentionally absent. DEBUG unset keeps
       # the production config guards armed; SEED_USER_EMAIL unset means no
       # account is ever auto-created on a public deployment.
