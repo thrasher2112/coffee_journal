@@ -221,7 +221,9 @@ backend/frontend images so vite HMR and `uvicorn --reload` keep working.
    With the Neon CLI you can skip the copying: `neon link --project-id <id>
    --branch production` writes `DATABASE_URL` into a gitignored `.env.local`.
 2. **App** - point Render at this repo; `render.yaml` describes the service.
-   Fill in the env vars it marks `sync: false`.
+   Fill in the env vars it marks `sync: false`. Note `branch:` in that file:
+   Render tracks whatever it names, so update it when the deploying branch
+   changes or you will keep shipping a stale one.
 3. **First deploy is two steps**: `FRONTEND_URL` and `API_URL` must be the URL
    Render assigns, which you only learn after the service exists. Deploy, copy
    the `https://...onrender.com` URL into both (no trailing slash), redeploy.
