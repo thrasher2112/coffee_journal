@@ -165,6 +165,10 @@ container dies at startup with `env: 'bash
 - All protected endpoints must use `Depends(get_current_user)`
 - All CRUD functions must accept and filter by `user_id`
 - New `setattr`-based update functions must use a field allowlist (`_BEAN_MUTABLE_FIELDS` / `_BREW_MUTABLE_FIELDS` pattern)
+- The one deliberate exception to user-scoped lookups is `routers/data.py::_id_taken`, which
+  checks whether a primary key is in use by *any* user. Ids are globally unique, so this is
+  the only way import can tell "free to reuse" from "belongs to someone else". It returns a
+  boolean for an id the caller already supplied and reads no row data. Do not generalise it.
 - Search strings passed to LIKE must be escaped (see `crud/bean.py` for the pattern)
 - New endpoints that create or modify data should have a `@limiter.limit(...)` decorator
 - Never give an account-creating script a default email address. Sign-in is by magic
