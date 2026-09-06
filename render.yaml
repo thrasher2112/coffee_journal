@@ -46,6 +46,12 @@ services:
       # bypass every limit, including the one on magic-link email.
       - key: TRUSTED_PROXY_HOPS
         value: "1"
+      # Comma-separated addresses allowed to sign in. Leave this unset and
+      # anyone who finds the URL can create an account - sign-in is
+      # passwordless, so requesting a link IS registration. Set it to your own
+      # address for a personal deployment.
+      - key: ALLOWED_EMAILS
+        sync: false
       # DEBUG and SEED_USER_EMAIL are intentionally absent. DEBUG unset keeps
       # the production config guards armed; SEED_USER_EMAIL unset means no
       # account is ever auto-created on a public deployment.

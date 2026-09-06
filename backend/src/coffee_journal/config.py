@@ -67,6 +67,21 @@ class Settings:
     # identity, so it must match the deployment.
     trusted_proxy_hops: int = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
 
+    # Comma-separated addresses permitted to sign in. Empty means anyone who
+    # can reach the app may create an account - sign-in is passwordless, so
+    # requesting a link for an address you control is registration. Set this on
+    # any deployment that is not meant to accept strangers.
+    allowed_emails: str = os.getenv("ALLOWED_EMAILS", "")
+
+    @property
+    def allowed_email_set(self) -> frozenset[str]:
+        """Parsed, normalised allowlist. Empty frozenset means "no restriction"."""
+        return frozenset(
+            entry.strip().lower()
+            for entry in self.allowed_emails.split(",")
+            if entry.strip()
+        )
+
     def __post_init__(self):
         self.database_url = normalize_database_url(self.database_url)
         if not self.debug:

@@ -257,6 +257,10 @@ in `localStorage` and flushed automatically when the connection returns.
 - [ ] Set `FRONTEND_URL` and `API_URL` to the deployed URL, no trailing slash
 - [ ] Leave `VITE_API_URL` unset - the single-origin build wants a relative base
 - [ ] Change `POSTGRES_PASSWORD` from default (self-hosted Postgres only)
+- [ ] Set `ALLOWED_EMAILS` to the addresses that may sign in - **empty means anyone who
+      finds the URL can create an account**, because requesting a magic link is registration
+- [ ] Set `TRUSTED_PROXY_HOPS` to the number of proxies in front of the app (1 on Render);
+      leaving it at 0 there means rate limits bucket every visitor together
 - [ ] Leave `SEED_USER_EMAIL` unset so no demo account is created
 - [ ] Verify no `.env` files are committed (`git status`)
 

@@ -14,7 +14,12 @@ def send_magic_link_email(to_email: str, token: str) -> None:
 
     Uses Resend when RESEND_API_KEY is configured, otherwise logs to console.
     """
-    verify_url = f"{settings.frontend_url.rstrip('/')}/auth/verify?token={token}"
+    # The token goes in the URL FRAGMENT, not the query string. Fragments are
+    # never sent to the server, so the token cannot land in an access log. It
+    # used to: the SPA and the API share one origin, so every click wrote
+    # `GET /auth/verify?token=<live credential>` into the app's own log stream,
+    # where anyone who could read logs could replay it.
+    verify_url = f"{settings.frontend_url.rstrip('/')}/auth/verify#token={token}"
 
     if not settings.resend_api_key:
         logger.info("Magic link for %s: %s", to_email, verify_url)

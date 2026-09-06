@@ -162,6 +162,14 @@ container dies at startup with `env: 'bash
 
 - Never commit `.env` files (already `.gitignore`d)
 - Never log or include the raw magic link token in responses — it goes to email/logs only
+- Magic link tokens are stored as a SHA-256 hash (`auth.hash_magic_link_token`); the raw
+  value exists only in the email. Never persist or log it, and never add a lookup by raw token
+- The sign-in link carries the token in the URL **fragment** (`/auth/verify#token=...`), never
+  the query string. The SPA and API share an origin, so a query string is written verbatim into
+  the API's own access log on every sign-in and stays replayable until it expires
+- `ALLOWED_EMAILS` gates `request_magic_link` AND `verify_magic_link_token`. Both are needed:
+  the second invalidates links already sent when someone is removed. Rejection must return the
+  same message as success, or the endpoint becomes an allowlist oracle
 - All protected endpoints must use `Depends(get_current_user)`
 - All CRUD functions must accept and filter by `user_id`
 - New `setattr`-based update functions must use a field allowlist (`_BEAN_MUTABLE_FIELDS` / `_BREW_MUTABLE_FIELDS` pattern)

@@ -9,6 +9,7 @@ from ..auth import (
     create_magic_link_token,
     create_session_jwt,
     get_current_user,
+    is_email_allowed,
     verify_magic_link_token,
 )
 from ..config import settings
@@ -27,8 +28,11 @@ def request_magic_link(request: Request, body: MagicLinkRequest, db: Session = D
     """Send a magic link to the user's email."""
     cleanup_expired_tokens(db)
     email = body.email.lower().strip()
-    token = create_magic_link_token(db, email)
-    send_magic_link_email(email, token)
+    # Identical response either way: a different message here would turn this
+    # endpoint into an oracle for which addresses are permitted.
+    if is_email_allowed(email):
+        token = create_magic_link_token(db, email)
+        send_magic_link_email(email, token)
     return {"message": "Check your email for a sign-in link."}
 
 

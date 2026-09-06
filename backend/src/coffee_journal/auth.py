@@ -1,6 +1,7 @@
 """Core authentication: magic links, JWT sessions, FastAPI dependencies."""
 from __future__ import annotations
 
+import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -13,6 +14,29 @@ from .config import settings
 from .db import get_db
 from .models.magic_link_token import MagicLinkToken
 from .models.user import User
+
+
+def hash_magic_link_token(token: str) -> str:
+    """SHA-256 hex of a raw magic link token.
+
+    Only this is stored. No salt or slow KDF: the input is 256 bits of
+    `secrets` output, so there is no dictionary to attack and nothing a work
+    factor would buy. Lookup is by hash equality, which is also why no
+    constant-time compare is needed - forging a matching hash would require the
+    preimage, i.e. the token itself.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def is_email_allowed(email: str) -> bool:
+    """Whether this address may sign in at all.
+
+    Sign-in is passwordless, so requesting a link for an address you control IS
+    registration - without this gate any stranger who reaches the app gets an
+    account. An empty ALLOWED_EMAILS keeps the historical open behaviour.
+    """
+    allowed = settings.allowed_email_set
+    return not allowed or email.strip().lower() in allowed
 
 
 def cleanup_expired_tokens(db: Session) -> int:
@@ -31,13 +55,18 @@ def cleanup_expired_tokens(db: Session) -> int:
 
 def create_magic_link_token(db: Session, email: str) -> str:
     """Create a single-use magic link token for the given email."""
-    token = secrets.token_hex(32)  # 64-char hex string
+    token = secrets.token_hex(32)  # 64-char hex string, 256 bits
     expires_at = datetime.now(UTC) + timedelta(
         minutes=settings.magic_link_expiry_minutes
     )
-    record = MagicLinkToken(email=email.lower().strip(), token=token, expires_at=expires_at)
+    record = MagicLinkToken(
+        email=email.lower().strip(),
+        token_hash=hash_magic_link_token(token),
+        expires_at=expires_at,
+    )
     db.add(record)
     db.commit()
+    # The raw token is returned for the email and never persisted.
     return token
 
 
@@ -49,7 +78,7 @@ def verify_magic_link_token(db: Session, token: str) -> User:
     """
     record = (
         db.query(MagicLinkToken)
-        .filter(MagicLinkToken.token == token)
+        .filter(MagicLinkToken.token_hash == hash_magic_link_token(token))
         .first()
     )
     if not record:
@@ -62,10 +91,28 @@ def verify_magic_link_token(db: Session, token: str) -> User:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This link has already been used.",
         )
-    if record.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+    # expires_at is DateTime(timezone=True): Postgres returns an aware value in
+    # the session timezone, while SQLite (tests) returns a naive one. `.replace`
+    # on an aware value overwrites the offset instead of converting it, which
+    # pushed expiry LATER by the offset east of UTC - a 15-minute link stayed
+    # valid for hours. Convert when aware, attach UTC only when naive.
+    expires_at = record.expires_at
+    expires_at = (
+        expires_at.replace(tzinfo=UTC)
+        if expires_at.tzinfo is None
+        else expires_at.astimezone(UTC)
+    )
+    if expires_at < datetime.now(UTC):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This link has expired.",
+        )
+
+    # A token issued before the allowlist tightened must not still work.
+    if not is_email_allowed(record.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired link.",
         )
 
     # Mark token as used

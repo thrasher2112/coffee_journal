@@ -19,7 +19,12 @@ class MagicLinkToken(Base):
         String(36), primary_key=True, default=lambda: str(uuid4()), unique=True
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    token: Mapped[str] = mapped_column(
+    # SHA-256 hex of the token that was emailed. The raw token is never stored:
+    # it is a bearer credential, so a readable copy in the database would let
+    # anyone with read access sign in as any user with a live row.
+    # sha256 hex is 64 chars, same width the raw hex token used, so the column
+    # is unchanged apart from its name.
+    token_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True, index=True
     )
     expires_at: Mapped[datetime] = mapped_column(
