@@ -4,6 +4,26 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Managed Postgres providers (Neon, Render, Railway, Supabase) all hand out
+# connection strings beginning "postgresql://" or "postgres://".
+_BARE_POSTGRES_SCHEMES = ("postgresql://", "postgres://")
+
+
+def normalize_database_url(url: str) -> str:
+    """Pin a bare Postgres URL to the psycopg3 driver.
+
+    SQLAlchemy reads a bare "postgresql://" as "use psycopg2", which this
+    project does not install - so pasting a provider's connection string in
+    verbatim would kill the app at boot with a ModuleNotFoundError that says
+    nothing about the real problem. Rewriting here means the string can be
+    copied across unedited. An explicit driver ("postgresql+asyncpg://", or
+    "+psycopg" itself) is left exactly as given.
+    """
+    for scheme in _BARE_POSTGRES_SCHEMES:
+        if url.startswith(scheme):
+            return f"postgresql+psycopg://{url[len(scheme):]}"
+    return url
+
 
 @dataclass
 class Settings:
@@ -40,6 +60,7 @@ class Settings:
     cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
 
     def __post_init__(self):
+        self.database_url = normalize_database_url(self.database_url)
         if not self.debug:
             if self.jwt_secret == "dev-secret-change-me":
                 raise RuntimeError(

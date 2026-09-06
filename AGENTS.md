@@ -137,9 +137,16 @@ go to `/api/...` on whatever origin served the app. Setting `VITE_API_URL` bakes
 host into the bundle at build time, which is what made earlier builds work only on the machine
 that built them. Use it only for a genuinely split-origin deploy.
 
+**`DATABASE_URL` is normalised, not validated.** `config.normalize_database_url` rewrites a
+bare `postgresql://` or `postgres://` to `postgresql+psycopg://`. Every managed provider
+(Neon, Render, Railway, Supabase) hands out the bare form, and SQLAlchemy reads that as
+psycopg2 - which is not installed, so an unedited paste used to kill the app at boot with a
+`ModuleNotFoundError` naming nothing relevant. An explicit driver is left untouched.
+
 **Shell scripts must stay LF.** `.gitattributes` forces `eol=lf` on `*.sh` and `Dockerfile`.
 Without it a Windows checkout (`core.autocrlf=true`) rewrites `start.sh` with CRLF and the
-container dies at startup with `env: 'bash': No such file or directory`.
+container dies at startup with `env: 'bash
+': No such file or directory`.
 
 ## Coding Standards
 

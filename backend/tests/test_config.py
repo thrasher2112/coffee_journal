@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from coffee_journal.config import Settings
+from coffee_journal.config import Settings, normalize_database_url
 
 
 def _make_settings(**overrides):
@@ -45,3 +45,32 @@ def test_debug_mode_allows_defaults():
         cookie_secure=False,
     )
     assert s.debug is True
+
+
+# --- DATABASE_URL driver normalisation -------------------------------------
+#
+# Every managed provider hands out a bare "postgresql://". SQLAlchemy reads that
+# as psycopg2, which is not installed, so an unedited paste used to kill the app
+# at boot with a ModuleNotFoundError that named nothing relevant.
+
+
+@pytest.mark.parametrize("scheme", ["postgresql", "postgres"])
+def test_bare_postgres_url_is_pinned_to_psycopg(scheme):
+    url = f"{scheme}://user:pw@ep-x.eu-central-1.aws.neon.tech/db?sslmode=require"
+    assert normalize_database_url(url) == (
+        "postgresql+psycopg://user:pw@ep-x.eu-central-1.aws.neon.tech/db?sslmode=require"
+    )
+
+
+def test_explicit_driver_is_left_alone():
+    for url in (
+        "postgresql+psycopg://user:pw@host/db",
+        "postgresql+asyncpg://user:pw@host/db",
+        "sqlite:///./local.db",
+    ):
+        assert normalize_database_url(url) == url
+
+
+def test_settings_normalises_on_construction():
+    s = _make_settings(database_url="postgres://user:pw@host/db?sslmode=require")
+    assert s.database_url.startswith("postgresql+psycopg://")

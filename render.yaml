@@ -14,8 +14,9 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
-      # Neon connection string, rewritten to the psycopg3 driver:
-      #   postgresql+psycopg://USER:PASSWORD@HOST/DB?sslmode=require
+      # Neon connection string, pasted in exactly as Neon gives it. The app
+      # pins the psycopg3 driver itself (config.normalize_database_url), so
+      # there is no scheme to hand-edit.
       - key: DATABASE_URL
         sync: false
       # Must be 32+ chars or the app refuses to boot. Generate with:

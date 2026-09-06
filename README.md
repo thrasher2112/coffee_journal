@@ -213,11 +213,13 @@ backend/frontend images so vite HMR and `uvicorn --reload` keep working.
 
 ### One-time setup
 
-1. **Database** - create a free [Neon](https://neon.tech) Postgres. Rewrite the
-   connection string it gives you to the psycopg3 driver:
-   `postgresql://...` becomes `postgresql+psycopg://...`, keeping
-   `?sslmode=require`. Migrations run automatically on every boot
+1. **Database** - create a free [Neon](https://neon.tech) Postgres and copy its
+   connection string in verbatim; the app pins the psycopg3 driver itself, so
+   there is no scheme to hand-edit. Migrations run automatically on every boot
    (`backend/start.sh`), so the schema builds itself.
+
+   With the Neon CLI you can skip the copying: `neon link --project-id <id>
+   --branch production` writes `DATABASE_URL` into a gitignored `.env.local`.
 2. **App** - point Render at this repo; `render.yaml` describes the service.
    Fill in the env vars it marks `sync: false`.
 3. **First deploy is two steps**: `FRONTEND_URL` and `API_URL` must be the URL
