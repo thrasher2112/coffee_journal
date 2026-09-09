@@ -162,3 +162,70 @@ def test_import_into_a_fresh_database_keeps_ids_and_is_idempotent(auth_client):
     assert auth_client.post("/api/import", json=payload).status_code == 202
     assert auth_client.get("/api/beans/").json()["total"] == 1
     assert auth_client.get("/api/brews/").json()["total"] == 1
+
+
+def test_export_includes_preferences(auth_client):
+    """A backup that omitted preferences would not actually restore everything."""
+    auth_client.put(
+        "/api/preferences",
+        json={"temperature_unit": "fahrenheit", "grinders": ["Comandante C40"]},
+    )
+
+    export = auth_client.get("/api/export").json()
+
+    assert export["preferences"]["temperature_unit"] == "fahrenheit"
+    assert export["preferences"]["grinders"] == ["Comandante C40"]
+
+
+def test_import_restores_preferences(auth_client):
+    export = {
+        "beans": [],
+        "brews": [],
+        "preferences": {
+            "temperature_unit": "fahrenheit",
+            "grinders": ["Restored Grinder"],
+            "preferred_grinder": "Restored Grinder",
+        },
+    }
+
+    assert auth_client.post("/api/import", json=export).status_code == 202
+
+    prefs = auth_client.get("/api/preferences").json()
+    assert prefs["temperature_unit"] == "fahrenheit"
+    assert prefs["grinders"] == ["Restored Grinder"]
+
+
+def test_import_without_preferences_still_works(auth_client):
+    """Backup files written before preferences were stored server-side."""
+    auth_client.put("/api/preferences", json={"temperature_unit": "fahrenheit"})
+
+    resp = auth_client.post(
+        "/api/import", json={"beans": [{"name": "Old Backup Bean"}], "brews": []}
+    )
+
+    assert resp.status_code == 202
+    # Untouched, not reset.
+    assert auth_client.get("/api/preferences").json()["temperature_unit"] == "fahrenheit"
+
+
+def test_full_backup_round_trip(auth_client):
+    """Export then re-import must reproduce the journal, not duplicate it."""
+    bean_id = auth_client.post("/api/beans/", json={"name": "Round Trip"}).json()["id"]
+    auth_client.post(
+        "/api/brews/",
+        json={
+            "bean_id": bean_id,
+            "bean_weight_g": 18,
+            "water_weight_g": 300,
+            "date": date.today().isoformat(),
+            "rating": 7,
+        },
+    )
+    auth_client.put("/api/preferences", json={"temperature_unit": "fahrenheit"})
+
+    backup = auth_client.get("/api/export").json()
+    assert auth_client.post("/api/import", json=backup).status_code == 202
+
+    assert auth_client.get("/api/beans/").json()["total"] == 1
+    assert auth_client.get("/api/brews/").json()["total"] == 1
+    assert auth_client.get("/api/preferences").json()["temperature_unit"] == "fahrenheit"

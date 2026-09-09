@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { ExportImportModal } from '../components/ExportImportModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
-import { importData } from '../lib/api';
+import { exportData, importData, NetworkError } from '../lib/api';
+import type { LocalBrew } from '../types';
 import { useBrewSync } from '../hooks/useBrewSync';
 import { TemperatureUnit, usePreferences } from '../contexts/PreferencesContext';
 
@@ -12,29 +13,95 @@ export function SettingsPage() {
   const { syncNow } = useBrewSync();
   const [modalOpen, setModalOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const { preferences, setPreference, addGrinder, removeGrinder, setPreferredGrinder } = usePreferences();
+  const { preferences, setPreference, addGrinder, removeGrinder, setPreferredGrinder, refresh } =
+    usePreferences();
   const [newGrinder, setNewGrinder] = useState('');
 
-  const localExport = useMemo(() => ({ localBrews: brews }), [brews]);
+  /**
+   * Download a complete backup.
+   *
+   * Everything the account holds server-side (beans, brews, preferences) plus
+   * any brews still queued on this device, so nothing is missed if the backup
+   * is taken before a sync. This used to write out only the offline queue,
+   * which meant a "backup" contained none of the journal.
+   */
+  const handleExport = async () => {
+    setStatus('Preparing backup...');
+    try {
+      const server = await exportData();
+      const backup = {
+        version: 1 as const,
+        exported_at: new Date().toISOString(),
+        beans: server.beans,
+        brews: server.brews,
+        preferences: server.preferences,
+        // Unsynced drafts live only on this device until they reach the server.
+        localBrews: unsynced
+      };
 
-  const handleExport = () => {
-    const blob = new Blob([JSON.stringify(localExport, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `coffee-journal-export-${new Date().toISOString()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `coffee-journal-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      setStatus(
+        `Backed up ${server.beans.length} bean${server.beans.length === 1 ? '' : 's'} and ` +
+          `${server.brews.length} brew${server.brews.length === 1 ? '' : 's'}` +
+          (unsynced.length ? `, plus ${unsynced.length} unsynced.` : '.')
+      );
+    } catch (err) {
+      setStatus(
+        err instanceof NetworkError
+          ? 'Cannot back up while offline - the journal lives on the server.'
+          : 'Backup failed.'
+      );
+    }
   };
 
-  const handleImport = (payload: unknown) => {
-    if (
-      typeof payload === 'object' &&
-      payload !== null &&
-      Array.isArray((payload as any).localBrews)
-    ) {
-      importLocal((payload as any).localBrews);
-      setStatus('Imported into offline vault.');
+  /** Restore a backup file: beans, brews and preferences go back to the server. */
+  const handleImport = async (payload: unknown) => {
+    const file = payload as {
+      beans?: unknown;
+      brews?: unknown;
+      preferences?: unknown;
+      localBrews?: unknown;
+    } | null;
+
+    if (!file || typeof file !== 'object' || (!Array.isArray(file.beans) && !Array.isArray(file.brews))) {
+      setStatus('That file does not look like a Coffee Journal backup.');
+      return;
+    }
+
+    setStatus('Restoring...');
+    try {
+      await importData({
+        beans: Array.isArray(file.beans) ? file.beans : [],
+        brews: Array.isArray(file.brews) ? file.brews : [],
+        preferences: file.preferences ?? undefined
+      });
+
+      // Drafts that never reached the server go back into the local queue.
+      if (Array.isArray(file.localBrews)) {
+        importLocal(file.localBrews as LocalBrew[]);
+      }
+      await refresh();
+
+      const beanCount = Array.isArray(file.beans) ? file.beans.length : 0;
+      const brewCount = Array.isArray(file.brews) ? file.brews.length : 0;
+      setStatus(
+        `Restored ${beanCount} bean${beanCount === 1 ? '' : 's'} and ` +
+          `${brewCount} brew${brewCount === 1 ? '' : 's'}. Open the journal to see them.`
+      );
+      setModalOpen(false);
+    } catch (err) {
+      setStatus(
+        err instanceof NetworkError
+          ? 'Cannot restore while offline.'
+          : 'Restore failed - the file may be from a different version.'
+      );
     }
   };
 
@@ -56,28 +123,6 @@ export function SettingsPage() {
       ? ` ${needsBean} draft${needsBean === 1 ? '' : 's'} still need a bean before they can sync.`
       : '';
     setStatus(synced ? `Synced ${synced} brew${synced === 1 ? '' : 's'}.${blocked}` : blocked.trim() || 'Nothing to sync.');
-  };
-
-  const handleServerImport = async () => {
-    try {
-      const serverPayload = {
-        beans: [],
-        brews: brews
-          .filter((brew) => Boolean(brew.bean_id))
-          .map(({ local_id, synced, created_at, ...rest }) => ({
-            ...rest,
-            bean_id: rest.bean_id ?? '',
-            agitation_events: rest.agitation_events,
-            created_at,
-            updated_at: created_at,
-            id: local_id
-          }))
-      };
-      await importData(serverPayload);
-      setStatus('Sent backup to API for safekeeping.');
-    } catch (error) {
-      setStatus('Server import failed.');
-    }
   };
 
   const handleTemperatureUnitChange = (unit: TemperatureUnit) => {
@@ -106,7 +151,7 @@ export function SettingsPage() {
     <section className="space-y-6">
       <header className="journal-card p-6">
         <h1 className="text-4xl font-display text-espresso">Settings & Sync</h1>
-        <p className="text-sm text-moss">Offline-first vault with manual export/import controls.</p>
+        <p className="text-sm text-moss">Sync, back up and restore your journal.</p>
         {status && <p className="mt-2 text-sm text-caramel">{status}</p>}
         <div className="mt-4 flex flex-wrap gap-3 text-sm text-moss">
           <span>Total local brews: {brews.length}</span>
@@ -117,10 +162,7 @@ export function SettingsPage() {
             Sync now
           </button>
           <button className="inline-flex min-h-11 items-center justify-center rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel" onClick={() => setModalOpen(true)}>
-            Export / Import
-          </button>
-          <button className="inline-flex min-h-11 items-center justify-center rounded-full border border-caramel/50 px-4 py-2 text-sm text-caramel" onClick={handleServerImport}>
-            Push snapshot to API
+            Back up / Restore
           </button>
         </div>
       </header>

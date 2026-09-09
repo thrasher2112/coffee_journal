@@ -1,8 +1,10 @@
 """Entry point for the Coffee Journal API."""
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -19,7 +21,47 @@ from .db import get_db
 from .rate_limit import limiter
 from .routers import api_router
 
-app = FastAPI(title=settings.app_name)
+logger = logging.getLogger("coffee_journal.startup")
+
+
+def _log_security_posture() -> None:
+    """State the security-relevant configuration plainly at boot.
+
+    Both of these fail silently when unset: the app starts, serves, and looks
+    healthy while being wide open or leaking credentials into the log stream.
+    Neither is visible from outside either - the magic-link endpoint answers
+    identically whether or not an address is allowed, by design - so the boot
+    log is the only place the posture can be seen.
+
+    Counts, never the addresses themselves: this log is read in a hosting
+    dashboard and should not become a list of who uses the app.
+    """
+    allowed = settings.allowed_email_set
+    if allowed:
+        logger.info("Sign-in restricted to %d allowed address(es).", len(allowed))
+    else:
+        logger.warning(
+            "ALLOWED_EMAILS is not set: anyone who can reach this app can create "
+            "an account, because requesting a magic link is registration."
+        )
+
+    if settings.resend_api_key:
+        logger.info("Magic links will be emailed via Resend.")
+    else:
+        logger.warning(
+            "RESEND_API_KEY is not set: magic links will be PRINTED TO THESE LOGS "
+            "instead of emailed. Anyone who can read them can sign in."
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Runs after uvicorn has configured logging, so these actually appear.
+    _log_security_posture()
+    yield
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

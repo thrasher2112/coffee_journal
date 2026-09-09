@@ -95,11 +95,17 @@ class MetricsOverview(BaseModel):
 class ExportPayload(BaseModel):
     beans: list[BeanRead]
     brews: list[BrewRead]
+    # Preferences live on the account now, so a backup that omitted them would
+    # not actually restore everything.
+    preferences: PreferencesRead | None = None
 
 
 class ImportPayload(BaseModel):
     beans: list[BeanImport] = Field(default_factory=list, max_length=500)
     brews: list[BrewImport] = Field(default_factory=list, max_length=2000)
+    # Optional so older backup files, written before preferences were stored
+    # server-side, still import cleanly.
+    preferences: PreferencesUpdate | None = None
 
 
 class BrewImport(BrewCreate):
@@ -109,3 +115,4 @@ class BrewImport(BrewCreate):
 
 
 from .bean import BeanImport, BeanRead
+from .user import PreferencesRead, PreferencesUpdate

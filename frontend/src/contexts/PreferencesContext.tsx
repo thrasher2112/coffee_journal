@@ -24,6 +24,8 @@ type PreferencesContextValue = {
   addGrinder: (name: string) => void;
   removeGrinder: (name: string) => void;
   setPreferredGrinder: (name: string) => void;
+  /** Re-read from the server, e.g. after restoring a backup. */
+  refresh: () => Promise<void>;
 };
 
 const DEFAULT_GRINDERS = [
@@ -214,6 +216,17 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
             preferredGrinder
           };
         });
+      },
+      refresh: async () => {
+        try {
+          const stored = await fetchPreferences();
+          if (serverHasPreferences(stored)) {
+            lastSyncedRef.current = JSON.stringify(stored);
+            setPreferences(fromServer(stored));
+          }
+        } catch {
+          // Offline: keep what this device has.
+        }
       },
       setPreferredGrinder: (name) => {
         setPreferences((prev) => {

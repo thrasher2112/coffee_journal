@@ -81,7 +81,7 @@ cd backend  && python -m pytest tests/ -q
 cd frontend && npx vitest run
 ```
 
-Current baseline: **99 backend tests, 32 frontend tests**, ruff clean (CI lints `src tests`).
+Current baseline: **103 backend tests, 32 frontend tests**, ruff clean (CI lints `src tests`).
 
 Keep regression coverage when touching routers, CRUD helpers, or auth logic.
 

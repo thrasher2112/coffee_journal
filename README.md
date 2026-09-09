@@ -233,8 +233,16 @@ backend/frontend images so vite HMR and `uvicorn --reload` keep working.
    silent failure. `RESEND_FROM` defaults to Resend's test sender, which needs
    no domain verification but only delivers to your own Resend account address -
    fine for a personal journal, not for inviting anyone else.
-5. **Move your data across** - no export tooling needed: use Settings →
-   Export / Import on the local instance, then import on the deployed one.
+5. **Move your data across** - use Settings → Back up / Restore on the local
+   instance, then restore the file on the deployed one.
+
+### Backups
+
+Settings → Back up / Restore downloads everything the account holds - beans,
+brews and preferences - plus any brews still queued offline on that device.
+Restoring merges by id, so re-running the same file updates in place instead of
+duplicating. Worth doing periodically: a free managed database gives you no
+backup you control.
 
 The free Render instance sleeps after ~15 minutes idle and takes ~50s to wake.
 The service worker still paints the app shell instantly and the offline queue

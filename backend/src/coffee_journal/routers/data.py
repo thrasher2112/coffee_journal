@@ -12,6 +12,7 @@ from ..models.user import User
 from ..rate_limit import limiter
 from ..schemas.bean import BeanRead
 from ..schemas.brew import BrewRead, ExportPayload, ImportPayload
+from ..schemas.user import PreferencesRead
 from ..sync.google_drive import GoogleDriveSyncStub
 
 router = APIRouter()
@@ -54,7 +55,11 @@ def export_data(
                 update={"bean_name": getattr(brew.bean, "name", None), "ratio": brew.ratio}
             )
         )
-    return {"beans": bean_payload, "brews": brew_payload}
+    return {
+        "beans": bean_payload,
+        "brews": brew_payload,
+        "preferences": PreferencesRead.model_validate(current_user),
+    }
 
 
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED)
@@ -66,6 +71,20 @@ def import_data(
     current_user: User = Depends(get_current_user),
 ):
     imported = {"beans": 0, "brews": 0}
+
+    # Restore preferences first: they are independent of the rows below, so a
+    # later failure there still leaves them applied.
+    if payload.preferences is not None:
+        prefs = payload.preferences.model_dump(exclude_unset=True)
+        if "temperature_unit" in prefs:
+            current_user.temperature_unit = prefs["temperature_unit"]
+        if "grinders" in prefs:
+            current_user.grinders = prefs["grinders"]
+        if "preferred_grinder" in prefs:
+            current_user.preferred_grinder = prefs["preferred_grinder"]
+        db.add(current_user)
+        db.commit()
+
     # Imported rows carry the ids they had in the source database, and the
     # lookups below are owner-scoped. An id that is not already ours may still
     # belong to ANOTHER user's row - ids are globally unique - so reusing it on

@@ -107,14 +107,14 @@ Input limits enforced at the Pydantic layer:
 | `20260325_09` | Add `token_version` to users (session revocation) |
 
 ### Tests — `tests/`
-99 tests across:
+103 tests across:
 - `test_health.py` — health endpoint
 - `test_beans.py` — bean CRUD + search + filters
 - `test_brews.py` — brew CRUD (incl. `test_update_brew_date` regression)
 - `test_auth.py` — magic link flow, session cookies, logout + revocation
 - `test_multi_tenant.py` — cross-user isolation, IDOR checks
 - `test_config.py` — production guard behavior + `DATABASE_URL` driver normalisation
-- `test_data.py` — import/export, incl. id-collision and idempotency regressions
+- `test_data.py` — backup/restore round trip, id-collision and idempotency regressions
 - `test_preferences.py` — per-user preference storage and isolation
 - `test_metrics.py` — metrics endpoint
 - `test_validation.py` — schema input limits

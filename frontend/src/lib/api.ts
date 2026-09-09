@@ -174,8 +174,15 @@ export async function savePreferences(
 
 // ---- Data ----
 
-export async function exportData() {
-  return request(`/api/export`);
+/** Everything the server holds for this account. */
+export interface ServerExport {
+  beans: Bean[];
+  brews: Brew[];
+  preferences: ServerPreferences | null;
+}
+
+export async function exportData(): Promise<ServerExport> {
+  return request<ServerExport>(`/api/export`);
 }
 
 export async function importData(payload: unknown) {
