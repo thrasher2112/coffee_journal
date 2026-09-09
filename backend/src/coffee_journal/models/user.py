@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -39,6 +39,15 @@ class User(Base):
         nullable=False,
     )
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Brewing preferences. These lived only in each browser's localStorage, so
+    # they did not follow the account between devices and were lost whenever
+    # site data was cleared. NULL means "never set on the server", which is
+    # distinct from "set to empty" - the client keeps its own defaults until the
+    # user changes something, and only then does a value get stored.
+    temperature_unit: Mapped[str | None] = mapped_column(String(16))
+    grinders: Mapped[list[str] | None] = mapped_column(JSON)
+    preferred_grinder: Mapped[str | None] = mapped_column(String(255))
 
     beans: Mapped[list[Bean]] = relationship("Bean", back_populates="user")
     brews: Mapped[list[Brew]] = relationship("Brew", back_populates="user")

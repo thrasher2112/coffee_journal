@@ -150,6 +150,28 @@ export async function fetchMetrics(): Promise<MetricsOverview> {
   return request<MetricsOverview>(`/api/metrics/overview`);
 }
 
+// ---- Preferences ----
+
+/** Server shape (snake_case). `null` means the user has never set that value. */
+export interface ServerPreferences {
+  temperature_unit: 'celsius' | 'fahrenheit' | null;
+  grinders: string[] | null;
+  preferred_grinder: string | null;
+}
+
+export async function fetchPreferences(): Promise<ServerPreferences> {
+  return request<ServerPreferences>(`/api/preferences`);
+}
+
+export async function savePreferences(
+  prefs: ServerPreferences
+): Promise<ServerPreferences> {
+  return request<ServerPreferences>(`/api/preferences`, {
+    method: 'PUT',
+    body: JSON.stringify(prefs)
+  });
+}
+
 // ---- Data ----
 
 export async function exportData() {
