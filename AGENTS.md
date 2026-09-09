@@ -9,15 +9,15 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
 ├── AGENTS.md
 ├── backend/
 │   ├── src/coffee_journal/
-│   │   ├── main.py          # CORS, security headers middleware, app factory
+│   │   ├── main.py          # CORS, security headers, SPA serving, boot posture log
 │   │   ├── config.py        # Settings dataclass (env vars + production guards)
 │   │   ├── auth.py          # Magic links, JWT, session revocation
 │   │   ├── email.py         # Resend / console fallback
-│   │   ├── rate_limit.py    # Shared slowapi Limiter instance
+│   │   ├── rate_limit.py    # Shared slowapi Limiter (trusted-hop client key)
 │   │   ├── models/          # SQLAlchemy ORM models
 │   │   ├── schemas/         # Pydantic v2 schemas (input limits)
 │   │   ├── crud/            # DB helpers
-│   │   └── routers/         # beans, brews, auth, metrics, data
+│   │   └── routers/         # beans, brews, auth, metrics, data, preferences
 │   ├── alembic/versions/    # DB migrations
 │   ├── tests/               # pytest suites
 │   └── pyproject.toml       # ruff + pytest config
@@ -26,9 +26,11 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
 │       ├── pages/           # Login, AuthVerify, Home, Beans, AllCups, BestCups, Settings
 │       ├── components/      # NavBar, ProtectedRoute, QuickLogBar, BrewCard, …
 │       ├── contexts/        # AuthContext, PreferencesContext
-│       ├── hooks/           # useLocalBrewStore
+│       ├── hooks/           # useLocalBrewStore, useBrewSync
 │       ├── styles/index.css # Tailwind v4 @theme (replaces tailwind.config.js)
 │       └── lib/api.ts       # All API calls
+├── Dockerfile               # Production image: one container, API + built SPA
+├── render.yaml              # Render blueprint
 ├── .github/workflows/ci.yml # CI: lint + test + build
 ├── docker-compose.yml
 ├── docker-compose.override.yml

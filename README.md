@@ -67,11 +67,18 @@ To sign out, use the logout button — this **revokes all active sessions** via 
 | `JWT_EXPIRY_HOURS` | `24` | Session lifetime |
 | `COOKIE_SECURE` | `false` | Set `true` in production (HTTPS) |
 | `COOKIE_DOMAIN` | *(empty)* | Set to your domain in production |
-| `RESEND_API_KEY` | *(empty)* | Leave blank to log links to console |
+| `RESEND_API_KEY` | *(empty)* | Leave blank to log links to console instead of emailing |
+| `RESEND_FROM` | `Coffee Journal <onboarding@resend.dev>` | Sender. The default is Resend's test sender: no domain verification needed, but it only delivers to your own Resend account address |
+| `ALLOWED_EMAILS` | *(empty)* | Comma-separated addresses allowed to sign in. **Empty means anyone who can reach the app can create an account** — sign-in is passwordless, so requesting a link is registration |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies in front of the app that append to `X-Forwarded-For` (1 on Render). Rate limiting reads that hop as the client. Never set it above the real count |
 | `MAGIC_LINK_EXPIRY_MINUTES` | `15` | How long magic links stay valid |
 | `SEED_USER_EMAIL` | *(empty)* | Address the sample data is attached to. **Unset = no seeding.** Use an address you control; it becomes a real loggable account |
 
 **Production guard**: if `DEBUG=false`, the app refuses to start without a strong `JWT_SECRET` and `COOKIE_SECURE=true`.
+
+`ALLOWED_EMAILS` and `TRUSTED_PROXY_HOPS` are *not* guarded — a wrong value fails silently
+and is invisible from outside. The app states both in its startup log instead, so one glance
+at the boot output confirms the posture.
 
 ---
 
@@ -81,26 +88,28 @@ To sign out, use the logout button — this **revokes all active sessions** via 
 .
 ├── backend/
 │   ├── src/coffee_journal/
-│   │   ├── main.py          # CORS, security headers, router mount
+│   │   ├── main.py          # CORS, security headers, router mount, SPA serving, boot posture log
 │   │   ├── config.py        # Settings dataclass + production guards
 │   │   ├── auth.py          # Magic links, JWT creation/validation, session revocation
 │   │   ├── email.py         # Resend / console fallback
-│   │   ├── rate_limit.py    # Shared slowapi limiter (proxy-aware)
+│   │   ├── rate_limit.py    # Shared slowapi limiter (trusted-hop client key)
 │   │   ├── models/          # SQLAlchemy ORM (User, Bean, Brew, MagicLinkToken)
 │   │   ├── schemas/         # Pydantic v2 (input limits, validation)
 │   │   ├── crud/            # DB helpers (setattr allowlist, LIKE-escaped search)
-│   │   ├── routers/         # beans, brews, auth, metrics, data
+│   │   ├── routers/         # beans, brews, auth, metrics, data, preferences
 │   │   └── scripts/         # seed_db.py
-│   ├── alembic/versions/    # 9 migrations (latest: token_version on users)
-│   └── tests/               # 71 pytest tests (SQLite in-memory)
+│   ├── alembic/versions/    # 11 migrations (latest: user preferences)
+│   └── tests/               # 103 pytest tests (SQLite in-memory)
 ├── frontend/
 │   └── src/
 │       ├── pages/           # Login, AuthVerify, Home, Beans, AllCups, BestCups, Settings
 │       ├── components/      # NavBar, ProtectedRoute, QuickLogBar, BrewCard, …
 │       ├── contexts/        # AuthContext, PreferencesContext
-│       ├── hooks/           # useLocalBrewStore
+│       ├── hooks/           # useLocalBrewStore, useBrewSync
 │       └── lib/api.ts       # fetch wrapper + all API calls
-├── .github/workflows/ci.yml # Lint + test on PR
+├── Dockerfile               # Production image: one container, API + built SPA
+├── render.yaml              # Render blueprint
+├── .github/workflows/ci.yml # Lint + test on push/PR
 ├── docker-compose.yml
 ├── docker-compose.override.yml  # dev mounts + hot-reload
 ├── Makefile
@@ -171,8 +180,9 @@ make lint             # ruff check
 - **Quick Brew**: brew style presets (pour over, Aeropress, French press) with Hoffmann ratios, grinder dropdown, °C/°F toggle, agitation timeline builder, split aroma/flavor/overall sliders
 - **Beans library**: search, date filters, elevation field, edit/copy/delete, usage metadata (first/last used, avg rating, brew count)
 - **All Cups / Best Cups**: full brew archive; Best Cups shows ≥8 rated brews with aroma tags and grinder details
-- **Settings**: JSON export/import (rate limited), offline vault sync, temperature unit preference, grinder management
-- **PWA**: offline-capable with service worker (API calls are never cached/intercepted)
+- **Settings**: full backup/restore (beans, brews and preferences as one JSON file), offline queue sync, temperature unit preference, grinder management
+- **Preferences follow the account**, not the browser — the same grinders and units on every device
+- **PWA**: installable on a phone, works offline (API calls are never cached/intercepted); brews logged with no signal queue locally and sync themselves on reconnect
 
 ---
 

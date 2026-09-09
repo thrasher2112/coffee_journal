@@ -29,15 +29,30 @@ This document describes how the stack is organized for contributors.
 ## Backend (FastAPI)
 
 ### Entry point — `main.py`
-- Configures CORS (explicit methods/headers, origin allowlist from env)
-- Adds `security_headers` HTTP middleware (CSP, X-Frame-Options, nosniff, Referrer-Policy)
+- Configures CORS (explicit methods/headers, origin allowlist from env). Production is
+  single-origin, so CORS never comes into play in normal use
+- Adds `security_headers` HTTP middleware (CSP, X-Frame-Options, nosniff, Referrer-Policy).
+  The CSP covers the SPA's own HTML, not just API JSON — see AGENTS.md before adding assets
 - Attaches shared rate limiter to `app.state`
 - Mounts `api_router` (prefix `/api`)
 - Exposes `/health` (DB probe)
+- **Serves the built SPA** from `STATIC_DIR` when present (`/app/static` in the production
+  image). The fallback is a `@app.exception_handler(404)`, deliberately not a catch-all
+  route — see AGENTS.md. Skipped entirely when the directory is absent, which is the local
+  split setup where vite serves the frontend
+- **`lifespan` logs the security posture at boot** — whether `ALLOWED_EMAILS` restricts
+  sign-in and whether `RESEND_API_KEY` is set. Both fail silently when unset and neither is
+  observable from outside, so this log is the only place the posture is visible. Counts,
+  never addresses
 
 ### Configuration — `config.py`
 - `Settings` dataclass reads env vars at class-definition time
 - `__post_init__` guard: if `DEBUG=false`, crashes on weak `JWT_SECRET` or missing `COOKIE_SECURE`
+- `normalize_database_url()` pins the psycopg3 driver onto a bare `postgresql://`, so a
+  provider's connection string can be pasted in unedited
+- `allowed_email_set` — parsed `ALLOWED_EMAILS`; empty means open registration
+- `trusted_proxy_hops` — how many proxies append to `X-Forwarded-For`; 0 (default) means
+  the header is ignored entirely
 - In tests: set `os.environ["DEBUG"] = "true"` **before** importing the app (done in `conftest.py`), or pass kwargs directly to `Settings()`
 
 ### Database — `db.py`
@@ -47,15 +62,24 @@ This document describes how the stack is organized for contributors.
 ### Models — `models/`
 | Model | Key Fields |
 |---|---|
-| `User` | `id`, `email`, `display_name`, `token_version`, `created_at` |
-| `MagicLinkToken` | `email`, `token`, `expires_at`, `used` |
+| `User` | `id`, `email`, `display_name`, `token_version`, `created_at`, plus preferences: `temperature_unit`, `grinders` (JSON), `preferred_grinder` |
+| `MagicLinkToken` | `email`, `token_hash`, `expires_at`, `used` |
 | `Bean` | `user_id`, `name`, `roaster`, `origin`, `process`, `roast_level`, `elevation_m`, `notes` |
 | `Brew` | `user_id`, `bean_id`, `date`, `bean_weight_g`, `water_weight_g`, `brew_style`, `grinder_name`, `grind_setting`, `grind_setting_notes`, `water_temp_c`, `bloom_time_s`, `total_brew_time_s`, `agitation_events`, `tasting_notes`, `flavor_tags`, `aroma_tags`, `rating`, `aroma_rating`, `flavor_rating` |
 
 All user-owned data (`Bean`, `Brew`) has a `user_id` FK; every CRUD query filters by it.
 
+Preference columns are nullable on purpose: `NULL` means "never set on the server", which
+the client reads as "keep my local defaults". That is distinct from "set to empty", and is
+why the migration does not backfill values over whatever each browser already held.
+
 ### Authentication — `auth.py`
-- `create_magic_link_token(db, email)` — creates a single-use 64-char hex token
+- `create_magic_link_token(db, email)` — mints a single-use 256-bit token, stores only
+  `sha256(token)`, and returns the raw value for the email. The database never holds a
+  usable credential
+- `hash_magic_link_token(token)` — the hash used for both storage and lookup
+- `is_email_allowed(email)` — `ALLOWED_EMAILS` gate, applied at request **and** verify;
+  the second is what invalidates links already sent when someone is removed
 - `verify_magic_link_token(db, token)` — validates, marks used, finds/creates user
 - `cleanup_expired_tokens(db)` — called on every `/magic-link` request; deletes used/expired tokens
 - `create_session_jwt(user)` — HS256 JWT with `sub`, `email`, `jti`, `token_version`, `iss`, `aud`, `iat`, `exp`
@@ -64,7 +88,11 @@ All user-owned data (`Bean`, `Brew`) has a `user_id` FK; every CRUD query filter
 
 ### Rate limiting — `rate_limit.py`
 - Single shared `Limiter` instance (avoids duplicate instances between `main.py` and routers)
-- Key function: `X-Forwarded-For` header → first IP (proxy-aware), fallback to `request.client.host`
+- Key function reads `X-Forwarded-For` from the **right**, taking exactly
+  `TRUSTED_PROXY_HOPS` entries, and ignores the header entirely when that is 0. Proxies
+  append, so the leftmost entry is caller-supplied: reading it (as this once did) let anyone
+  mint a fresh bucket per request. `start.sh` only passes `--proxy-headers` when hops > 0,
+  otherwise uvicorn would rewrite `request.client` from that same header
 - Disabled in tests via `limiter.enabled = False` in `conftest.py`
 
 ### Schemas — `schemas/`
@@ -78,6 +106,8 @@ Input limits enforced at the Pydantic layer:
 - Tag lists: `max_length=50` items
 - Agitation events: `max_length=100` items
 - Import: `max_length=500` beans, `max_length=2000` brews
+- Preferences: `max_length=50` grinders, each 1–120 chars; `temperature_unit` is a
+  `Literal["celsius", "fahrenheit"]`
 
 ### CRUD — `crud/`
 - `bean.py`: search uses `%`/`_`-escaped LIKE; `update_bean` uses `_BEAN_MUTABLE_FIELDS` allowlist
@@ -92,6 +122,7 @@ Input limits enforced at the Pydantic layer:
 | `brews.py` | `/api/brews` | `POST /`: 30/min |
 | `data.py` | `/api` | `GET /export`: 10/min; `POST /import`: 5/min |
 | `metrics.py` | `/api/metrics` | — |
+| `preferences.py` | `/api/preferences` | `PUT`: 30/min |
 
 ### Migrations — `alembic/versions/`
 | Revision | Change |
@@ -105,6 +136,8 @@ Input limits enforced at the Pydantic layer:
 | `20260325_07` | Add `user_id` FK to beans + brews |
 | `20260325_08` | Backfill + enforce NOT NULL on `user_id` |
 | `20260325_09` | Add `token_version` to users (session revocation) |
+| `20260906_10` | Store `sha256(token)` instead of the raw token; rename `token` → `token_hash` |
+| `20260909_11` | Add preference columns to users (moved off browser localStorage) |
 
 ### Tests — `tests/`
 103 tests across:
@@ -141,15 +174,18 @@ All routes under `/` are wrapped in `ProtectedRoute` (redirects to `/login` if n
 | Route | Page | Notes |
 |---|---|---|
 | `/login` | `LoginPage` | Requests magic link |
-| `/auth/verify` | `AuthVerifyPage` | POSTs token to backend, sets cookie |
+| `/auth/verify` | `AuthVerifyPage` | Reads the token from the URL fragment, POSTs it, sets cookie |
 | `/` | `HomePage` | Quick Brew + dashboard charts |
 | `/beans` | `BeansPage` | Search, filter, edit/copy/delete |
 | `/all-cups` | `AllCupsPage` | Full brew archive |
 | `/best-cups` | `BestCupsPage` | Brews rated ≥8 |
-| `/settings` | `SettingsPage` | Preferences, import/export, grinders |
+| `/settings` | `SettingsPage` | Preferences, backup/restore, grinders, sign out |
 
 ### Auth flow
-1. `AuthVerifyPage` extracts `?token=` from URL, POSTs it to `POST /api/auth/verify` (token in JSON body — never in URL to backend)
+1. `AuthVerifyPage` reads the token from the URL **fragment** (`/auth/verify#token=...`) and
+   POSTs it to `POST /api/auth/verify`. A fragment is never sent to the server: with the SPA
+   and API on one origin, a query string was written verbatim into the API's own access log
+   on every sign-in. The page also strips it from the address bar once used
 2. Backend sets `session` HttpOnly cookie
 3. `AuthContext.checkAuth()` calls `GET /api/auth/me`. A real 401 (`AuthError`) clears auth state; an unreachable API (`NetworkError`) instead falls back to the identity cached in `localStorage`, so launching the installed app offline opens the journal rather than the login screen. That cache is display-only — the session is still the HttpOnly cookie and every call is authorised server-side.
 
@@ -170,9 +206,31 @@ There is no `tailwind.config.js`; PostCSS uses `@tailwindcss/postcss` (autoprefi
 - Auth functions: `requestMagicLink`, `verifyMagicLink` (POST), `fetchCurrentUser`, `logoutUser`
 - Data functions: `fetchBeans`, `createBean`, `updateBean`, `deleteBean`, `copyBean`
 - Brew functions: `fetchBrews`, `createBrew`
+- Preferences: `fetchPreferences`, `savePreferences`
+- Backup: `exportData` (typed `ServerExport`), `importData`
 - Util: `syncBrews` (flushes offline queue)
 - `NetworkError` marks a request that never reached the API, as distinct from one that arrived and was rejected. Only the former should queue a brew or keep a cached session — a 422 queued as an outage would retry forever.
 - `API_URL` defaults to `''` (same origin). See AGENTS.md before setting `VITE_API_URL`.
+
+### Preferences — `contexts/PreferencesContext.tsx`
+Temperature unit, grinder list and preferred grinder live on the **user row**, not just in
+the browser. `localStorage` remains the offline cache so preferences are right on the first
+paint and keep working with no connection; the server becomes the source of truth once it
+answers.
+
+- Pushes are gated on hydration having completed, so a local value cannot overwrite the
+  account's before it has been read — otherwise signing in on a fresh device would clobber
+  real settings with that device's defaults
+- A server with all-null preferences means a new account: the first device to sign in seeds
+  it from its local values
+- A change made offline is retried on the `online` event
+- `refresh()` re-reads from the server, used after restoring a backup
+
+### Backup & restore — `pages/Settings.tsx`
+`GET /api/export` returns beans, brews **and** preferences; the download adds any brews still
+queued on the device, so nothing is lost if a backup is taken before a sync. Restore posts
+them back. Import merges by id, so restoring the same file twice updates in place rather
+than duplicating.
 
 ### Offline sync — `hooks/useBrewSync.ts`
 - `useBrewSync()` is the single flush path, shared by Settings' "Sync now" button and the automatic flush

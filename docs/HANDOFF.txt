@@ -176,7 +176,8 @@ Deploy
 - RESEND_FROM replaces a hardcoded sender on a domain we do not own (Resend
   would have rejected every send).
 - .gitattributes pins *.sh to LF. A Windows checkout otherwise rewrites start.sh
-  with CRLF and the container dies with: env: 'bash': No such file or directory
+  with CRLF and the container dies with: env: 'bash
+': No such file or directory
 
 Bugs fixed
 - import_data reused row ids that belong to another user -> 500. Reachable from
@@ -198,3 +199,97 @@ Known gaps from this pass
   (...0001). Cleaning it up means a new migration; not done here.
 - Importing ANOTHER user's export twice still duplicates (ids are remapped each
   time). Only your own export is idempotent. Would need a natural key to fix.
+
+
+================================================================
+Deployment, Security Audit + Account Data (2026-09-06 .. 09)
+================================================================
+
+The app is now deployed and running on a phone. Branch: feat/mobile-pwa.
+
+Deployment
+- Render web service (free), Docker runtime, root Dockerfile, tracking
+  feat/mobile-pwa. Neon free Postgres, which does NOT expire the way Render's
+  own free Postgres does. render.yaml describes the service but a Web Service
+  created by hand does not read it - every var must then be set manually.
+- Two-step first deploy: FRONTEND_URL and API_URL cannot be known until Render
+  assigns the URL. Until they are set, magic links point at localhost.
+- Diagnosing that is easier than it looks: CORS origins are built from those two
+  vars, so probing /health with an Origin header reads back the running config
+  without any dashboard access.
+- config.normalize_database_url pins psycopg3 onto a bare postgresql:// so a
+  provider string can be pasted in unedited. Getting this wrong used to kill the
+  app at boot with a ModuleNotFoundError naming nothing relevant.
+
+Security audit before going public - findings and fixes
+1. Magic-link tokens were written into the API's own access log. The link
+   carried the token in a query string, and single-origin means the SPA route is
+   served by the same uvicorn process that writes the log. Every sign-in logged
+   `GET /auth/verify?token=<live credential>`, replayable until it expired, with
+   no rate limit on /verify. Now in the URL fragment, which browsers never send.
+2. Tokens were stored in cleartext. magic_link_tokens was a table of live bearer
+   credentials. Only sha256 is stored now; column renamed token -> token_hash.
+   No salt or KDF - the input is 256 bits of secrets, so there is no dictionary
+   to attack - and no constant-time compare, since lookup is by hash and forging
+   a match needs the preimage.
+3. Open registration. Sign-in is passwordless, so requesting a link IS
+   registration. ALLOWED_EMAILS now gates request AND verify; the second is what
+   invalidates links already sent when someone is removed. Rejection returns the
+   same message as success, or the endpoint becomes an allowlist oracle.
+4. Expiry could extend. expires_at is DateTime(timezone=True) and
+   .replace(tzinfo=UTC) overwrote the offset instead of converting it, pushing
+   expiry LATER east of UTC - a 15-minute link stayed valid for hours.
+5. Rate-limit identity was caller-controlled. _get_real_ip took the FIRST
+   X-Forwarded-For entry; proxies append, so that entry is whatever the caller
+   sent. Every @limiter.limit was decorative. Now read from the right, taking
+   TRUSTED_PROXY_HOPS entries, ignored entirely at 0.
+   Follow-up: the first fix was incomplete. start.sh passed
+   --forwarded-allow-ips="*" unconditionally, so uvicorn rewrote
+   scope["client"] from the same header and the hops=0 fallback was still
+   spoofable. The flags are now passed only when hops > 0.
+
+Preferences moved onto the account
+- Temperature unit, grinder list and preferred grinder lived only in each
+  browser's localStorage: they did not follow the account and were lost when
+  site data was cleared. Three nullable columns on users (migration 11).
+- NULL means "never set on the server", deliberately distinct from "set to
+  empty": the client keeps its defaults until the user changes something, so the
+  first device to sign in seeds the account rather than a backfill overwriting
+  whatever each browser held.
+- Client pushes are gated on hydration completing, so a local value cannot
+  overwrite the account's before it has been read.
+
+Backup and restore
+- The Export/Import buttons only ever touched the offline queue: export wrote
+  `{localBrews: [...]}`, so a file saved as a backup contained none of the
+  journal. Export now downloads beans, brews and preferences plus any brews
+  still queued on the device; restore posts them back. Merging is by id, so
+  restoring the same file twice updates in place.
+- Removed "Push snapshot to API": it sent beans: [] alongside brews referencing
+  bean ids, so it 400'd for anything not already on the server, and Sync now
+  already does what it was attempting.
+
+Boot-time posture logging
+- ALLOWED_EMAILS and RESEND_API_KEY both fail silently when unset, and neither
+  is observable from outside. The app now states both at startup. Counts, never
+  addresses - the log is read in a hosting dashboard.
+
+Operational notes
+- Free Render instances sleep after ~15 min; first request takes ~50s. The
+  service worker paints the shell immediately while the backend wakes.
+- onboarding@resend.dev needs no domain verification but only delivers to your
+  own Resend account address, and lands in spam fairly often. It is also acting
+  as an accidental second gate on registration - verifying a domain removes it,
+  so confirm ALLOWED_EMAILS is set before doing that.
+- Neon free tier gives you no backup you control. Use Settings -> Back up.
+
+Known gaps carried forward
+- Migration 20260325_08 still creates legacy@coffee-journal.local on every
+  database. Inert (EmailStr rejects the reserved TLD) but it is noise.
+- Importing ANOTHER user's export twice still duplicates; only your own export
+  is idempotent. Would need a natural key.
+- No HSTS header. onrender.com is HSTS-preloaded so it does not matter today,
+  but it would on a custom domain.
+- Not merged to main. render.yaml pins branch: feat/mobile-pwa - change it, and
+  the branch in Render's dashboard, on merge.
+
