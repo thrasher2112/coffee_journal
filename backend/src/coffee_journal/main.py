@@ -115,17 +115,6 @@ async def security_headers(request: Request, call_next):
 app.include_router(api_router)
 
 
-@app.get("/debug/xff", tags=["debug"])
-def _debug_xff(request: Request):
-    """TEMPORARY: confirm the real X-Forwarded-For shape in front of this
-    deploy so TRUSTED_PROXY_HOPS can be set correctly. Remove before merging.
-    """
-    return {
-        "x_forwarded_for": request.headers.get("x-forwarded-for"),
-        "client": request.client.host if request.client else None,
-    }
-
-
 @app.get("/health", tags=["health"])
 def health(db: Session = Depends(get_db)):
     """Lightweight health probe."""

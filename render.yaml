@@ -41,16 +41,20 @@ services:
       - key: COOKIE_SECURE
         value: "true"
       # Render fronts every public service with Cloudflare by default, then its
-      # own load balancer terminates TLS - two hops append to X-Forwarded-For,
-      # not one. Getting this wrong doesn't fail loudly: with it set too low,
-      # _get_real_ip reads Cloudflare's (churning) edge IP instead of the real
-      # client, so every request looks like a new client and rate limiting -
-      # including the one on magic-link email - silently stops doing anything.
-      # Verified against the live deploy: 8 rapid requests all got 200 at
-      # hops=1; setting it higher than the real count is just as bad the other
-      # way, letting callers forge the header and choose their own bucket.
+      # own internal load balancer relays to the container - three hops append
+      # to X-Forwarded-For: [client, Cloudflare edge, Render internal 10.x],
+      # confirmed by temporarily echoing the header from this exact deploy
+      # (see git history for GET /debug/xff). Getting this wrong doesn't fail
+      # loudly: too low reads a hop that churns per request (the Cloudflare
+      # and Render entries both change request to request), so every request
+      # looks like a new client and rate limiting - including the one on
+      # magic-link email - silently stops doing anything. Verified against
+      # the live deploy at each wrong value: 8 rapid requests all got 200 at
+      # hops=1, and still mostly got 200 at hops=2. Setting it higher than the
+      # real count is just as bad the other way, letting callers forge the
+      # header and choose their own bucket.
       - key: TRUSTED_PROXY_HOPS
-        value: "2"
+        value: "3"
       # Comma-separated addresses allowed to sign in. Leave this unset and
       # anyone who finds the URL can create an account - sign-in is
       # passwordless, so requesting a link IS registration. Set it to your own
