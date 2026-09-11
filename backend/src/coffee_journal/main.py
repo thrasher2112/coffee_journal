@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_db
-from .rate_limit import limiter
+from .rate_limit import _get_real_ip, limiter
 from .routers import api_router
 
 logger = logging.getLogger("coffee_journal.startup")
@@ -113,6 +113,20 @@ async def security_headers(request: Request, call_next):
 
 
 app.include_router(api_router)
+
+
+@app.get("/debug/xff", tags=["debug"])
+def _debug_xff(request: Request):
+    """TEMPORARY: confirm what the rate limiter's own key function computes,
+    across repeated requests, since hops=3 alone did not fix rate limiting.
+    Remove once this has answered that question.
+    """
+    return {
+        "x_forwarded_for": request.headers.get("x-forwarded-for"),
+        "client": request.client.host if request.client else None,
+        "computed_key": _get_real_ip(request),
+        "trusted_proxy_hops": settings.trusted_proxy_hops,
+    }
 
 
 @app.get("/health", tags=["health"])
