@@ -70,7 +70,7 @@ To sign out, use the logout button — this **revokes all active sessions** via 
 | `RESEND_API_KEY` | *(empty)* | Leave blank to log links to console instead of emailing |
 | `RESEND_FROM` | `Coffee Journal <onboarding@resend.dev>` | Sender. The default is Resend's test sender: no domain verification needed, but it only delivers to your own Resend account address |
 | `ALLOWED_EMAILS` | *(empty)* | Comma-separated addresses allowed to sign in. **Empty means anyone who can reach the app can create an account** — sign-in is passwordless, so requesting a link is registration |
-| `TRUSTED_PROXY_HOPS` | `0` | Proxies in front of the app that append to `X-Forwarded-For` (1 on Render). Rate limiting reads that hop as the client. Never set it above the real count |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies in front of the app that append to `X-Forwarded-For` (2 on Render: Cloudflare, which fronts every public service by default, then Render's own load balancer). Rate limiting reads that hop as the client. Setting it too low is just as bad as too high — it reads Cloudflare's own (churning) edge IP instead of the real client, and rate limiting silently stops doing anything |
 | `MAGIC_LINK_EXPIRY_MINUTES` | `15` | How long magic links stay valid |
 | `SEED_USER_EMAIL` | *(empty)* | Address the sample data is attached to. **Unset = no seeding.** Use an address you control; it becomes a real loggable account |
 
@@ -277,8 +277,10 @@ in `localStorage` and flushed automatically when the connection returns.
 - [ ] Change `POSTGRES_PASSWORD` from default (self-hosted Postgres only)
 - [ ] Set `ALLOWED_EMAILS` to the addresses that may sign in - **empty means anyone who
       finds the URL can create an account**, because requesting a magic link is registration
-- [ ] Set `TRUSTED_PROXY_HOPS` to the number of proxies in front of the app (1 on Render);
-      leaving it at 0 there means rate limits bucket every visitor together
+- [ ] Set `TRUSTED_PROXY_HOPS` to the number of proxies in front of the app (2 on Render:
+      Cloudflare, then Render's own load balancer). Too low - including the default 0 -
+      buckets every visitor together or, worse, reads a hop that churns per request and
+      disables rate limiting outright; too high lets callers forge their own bucket
 - [ ] Leave `SEED_USER_EMAIL` unset so no demo account is created
 - [ ] Verify no `.env` files are committed (`git status`)
 

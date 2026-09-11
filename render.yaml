@@ -40,12 +40,17 @@ services:
         value: Coffee Journal <onboarding@resend.dev>
       - key: COOKIE_SECURE
         value: "true"
-      # Render terminates TLS and appends exactly one entry to X-Forwarded-For.
-      # Rate limiting reads that hop as the client identity. Leave it at the
-      # real hop count: setting it higher lets callers forge the header and
-      # bypass every limit, including the one on magic-link email.
+      # Render fronts every public service with Cloudflare by default, then its
+      # own load balancer terminates TLS - two hops append to X-Forwarded-For,
+      # not one. Getting this wrong doesn't fail loudly: with it set too low,
+      # _get_real_ip reads Cloudflare's (churning) edge IP instead of the real
+      # client, so every request looks like a new client and rate limiting -
+      # including the one on magic-link email - silently stops doing anything.
+      # Verified against the live deploy: 8 rapid requests all got 200 at
+      # hops=1; setting it higher than the real count is just as bad the other
+      # way, letting callers forge the header and choose their own bucket.
       - key: TRUSTED_PROXY_HOPS
-        value: "1"
+        value: "2"
       # Comma-separated addresses allowed to sign in. Leave this unset and
       # anyone who finds the URL can create an account - sign-in is
       # passwordless, so requesting a link IS registration. Set it to your own

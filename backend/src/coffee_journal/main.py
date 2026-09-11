@@ -22,6 +22,15 @@ from .rate_limit import limiter
 from .routers import api_router
 
 logger = logging.getLogger("coffee_journal.startup")
+# Uvicorn's own logging setup (uvicorn.config.LOGGING_CONFIG) only attaches
+# handlers to its own "uvicorn*" loggers, not to root - so without this, INFO
+# records here have nowhere to go. Root's implicit level is WARNING, so they
+# would be silently dropped even if a handler existed. Configuring this
+# logger directly, rather than the root logger, keeps the fix local instead
+# of turning on INFO-level noise from every other library (e.g. SQLAlchemy).
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    logger.addHandler(logging.StreamHandler())
 
 
 def _log_security_posture() -> None:
@@ -56,7 +65,6 @@ def _log_security_posture() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Runs after uvicorn has configured logging, so these actually appear.
     _log_security_posture()
     yield
 
@@ -105,6 +113,17 @@ async def security_headers(request: Request, call_next):
 
 
 app.include_router(api_router)
+
+
+@app.get("/debug/xff", tags=["debug"])
+def _debug_xff(request: Request):
+    """TEMPORARY: confirm the real X-Forwarded-For shape in front of this
+    deploy so TRUSTED_PROXY_HOPS can be set correctly. Remove before merging.
+    """
+    return {
+        "x_forwarded_for": request.headers.get("x-forwarded-for"),
+        "client": request.client.host if request.client else None,
+    }
 
 
 @app.get("/health", tags=["health"])
