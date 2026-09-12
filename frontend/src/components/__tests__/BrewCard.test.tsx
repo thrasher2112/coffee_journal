@@ -41,4 +41,16 @@ describe('BrewCard', () => {
     expect(screen.getByText('3:05')).toBeInTheDocument();
     expect(screen.getByText('0:45')).toBeInTheDocument();
   });
+
+  it('shows the grind setting alongside the grinder name', () => {
+    render(<BrewCard brew={{ ...baseBrew, grinder_name: 'Baratza Encore', grind_setting: '18' }} />);
+    fireEvent.click(screen.getByText('Show details'));
+    expect(screen.getByText('Baratza Encore (18)')).toBeInTheDocument();
+  });
+
+  it('shows just the grinder name when no grind setting is recorded', () => {
+    render(<BrewCard brew={{ ...baseBrew, grinder_name: 'Baratza Encore' }} />);
+    fireEvent.click(screen.getByText('Show details'));
+    expect(screen.getByText('Baratza Encore')).toBeInTheDocument();
+  });
 });

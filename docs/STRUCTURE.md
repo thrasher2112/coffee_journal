@@ -175,7 +175,8 @@ All routes under `/` are wrapped in `ProtectedRoute` (redirects to `/login` if n
 |---|---|---|
 | `/login` | `LoginPage` | Requests magic link |
 | `/auth/verify` | `AuthVerifyPage` | Reads the token from the URL fragment, POSTs it, sets cookie |
-| `/` | `HomePage` | Quick Brew + dashboard charts |
+| `/` | `HomePage` | Quick Brew widget (collapsed form) + dashboard charts |
+| `/brew` | `BrewFormPage` | Full brew log, defaults to the advanced fields; can collapse back to the quick set. Reached via the "Full Brew Log" link on Home, which carries over any in-progress draft through router navigation state |
 | `/beans` | `BeansPage` | Search, filter, edit/copy/delete |
 | `/all-cups` | `AllCupsPage` | Full brew archive |
 | `/best-cups` | `BestCupsPage` | Brews rated ≥8 |

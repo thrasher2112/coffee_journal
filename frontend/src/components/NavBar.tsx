@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -80,26 +80,9 @@ function Glyph({ children }: { children: ReactNode }) {
 
 export function NavBar() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
 
   const handleLogout = async () => {
     await logout();
-  };
-
-  // The old `<a href="#quick-log">` only resolved on the home route and silently
-  // did nothing everywhere else. Route home first when we are not already there.
-  const handleQuickLog = () => {
-    const scroll = () =>
-      document.getElementById('quick-log')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    if (location.pathname === '/') {
-      scroll();
-    } else {
-      navigate('/');
-      // Runs after React has committed the new route.
-      setTimeout(scroll, 0);
-    }
   };
 
   return (
@@ -127,13 +110,6 @@ export function NavBar() {
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleQuickLog}
-              className="inline-flex min-h-11 items-center rounded-full bg-caramel px-4 text-espresso text-sm font-semibold shadow-card"
-            >
-              Quick Log
-            </button>
             {user && (
               <div className="hidden items-center gap-2 text-sm text-crema/70 md:flex">
                 <span>{user.display_name || user.email}</span>

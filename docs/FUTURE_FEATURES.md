@@ -16,9 +16,11 @@ in its own right, not a small addition to the mm:ss fix, so it's parked
 here with the design decisions already made during that conversation.
 
 **What it would do**: a timer widget inside `QuickLogBar`'s advanced
-section (so it's available from both the Home "Quick Brew" widget and the
-`/brew` Advanced Brew Form, matching how bloom/total-time/agitation fields
-already only show in advanced mode). While a brew is in progress:
+section. As of the 2026-09 navigation rework, that section only renders
+on the `/brew` page (`variant="full"`) - the Home "Quick Brew" widget
+(`variant="quick"`) no longer has an advanced-mode toggle of its own, just
+a "Full Brew Log" link to `/brew` - so the timer would live there rather
+than being reachable from both places. While a brew is in progress:
 
 - **Start** begins the clock at t=0, matching the moment the bloom pour
   happens.

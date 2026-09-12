@@ -109,7 +109,10 @@ export function BrewCard({ brew }: Props) {
           <div className="space-y-2">
             <div className="flex justify-between text-xs uppercase tracking-[0.3em] text-moss">
               <span>Grinder</span>
-              <span>{brew.grinder_name ?? '—'}</span>
+              <span>
+                {brew.grinder_name ?? '—'}
+                {brew.grind_setting ? ` (${brew.grind_setting})` : ''}
+              </span>
             </div>
             <AgitationTimeline events={brew.agitation_events ?? []} />
           </div>

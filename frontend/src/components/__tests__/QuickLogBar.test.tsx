@@ -15,22 +15,49 @@ const beans: Bean[] = [
   { id: 'bean-1', name: 'Ethiopia', created_at: '', updated_at: '' },
 ];
 
-function renderForm() {
+function renderForm(variant?: 'quick' | 'full') {
   return render(
     <BrowserRouter>
-      <QuickLogBar beans={beans} onSave={vi.fn()} defaultBeanId="bean-1" />
+      <QuickLogBar beans={beans} onSave={vi.fn()} defaultBeanId="bean-1" variant={variant} />
     </BrowserRouter>
   );
 }
 
-function enableAdvanced() {
-  fireEvent.click(screen.getByLabelText('Advanced mode'));
-}
+describe('QuickLogBar variants', () => {
+  it('quick (default) shows a link to the full form instead of a checkbox', () => {
+    renderForm();
+    expect(screen.getByText('Full Brew Log')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Advanced mode')).not.toBeInTheDocument();
+    expect(screen.getByText('Quick Brew')).toBeInTheDocument();
+  });
+
+  it('full shows the advanced-mode checkbox, already checked, and no "Quick Brew" heading', () => {
+    renderForm('full');
+    const checkbox = screen.getByLabelText('Advanced mode');
+    expect(checkbox).toBeChecked();
+    expect(screen.queryByText('Quick Brew')).not.toBeInTheDocument();
+    expect(screen.queryByText('Full Brew Log')).not.toBeInTheDocument();
+    // Advanced-only fields are visible without any extra toggling.
+    expect(screen.getByText('Bloom time')).toBeInTheDocument();
+  });
+
+  it('full can still collapse back to the quick field set', () => {
+    renderForm('full');
+    fireEvent.click(screen.getByLabelText('Advanced mode'));
+    expect(screen.queryByText('Bloom time')).not.toBeInTheDocument();
+    expect(screen.queryByText(/quick/i)).not.toBeInTheDocument();
+  });
+
+  it('labels the notes field "Notes", not "Quick notes"', () => {
+    renderForm();
+    expect(screen.getByText('Notes')).toBeInTheDocument();
+    expect(screen.queryByText('Quick notes')).not.toBeInTheDocument();
+  });
+});
 
 describe('QuickLogBar agitation amount derivation', () => {
   it('derives the first event\'s amount directly from its total poured', () => {
-    renderForm();
-    enableAdvanced();
+    renderForm('full');
     fireEvent.click(screen.getByText('+ Add event'));
 
     fireEvent.change(screen.getByLabelText('Total poured so far in grams'), {
@@ -41,8 +68,7 @@ describe('QuickLogBar agitation amount derivation', () => {
   });
 
   it('derives each later event\'s amount as the delta from the previous total', () => {
-    renderForm();
-    enableAdvanced();
+    renderForm('full');
     fireEvent.click(screen.getByText('+ Add event'));
     fireEvent.click(screen.getByText('+ Add event'));
 
@@ -55,8 +81,7 @@ describe('QuickLogBar agitation amount derivation', () => {
   });
 
   it('recomputes the later delta when an earlier total is edited', () => {
-    renderForm();
-    enableAdvanced();
+    renderForm('full');
     fireEvent.click(screen.getByText('+ Add event'));
     fireEvent.click(screen.getByText('+ Add event'));
 

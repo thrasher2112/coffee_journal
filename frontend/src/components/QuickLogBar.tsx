@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AromaTag, Bean, BrewDraft, FlavorTag } from '../types';
 import { BeanPicker } from './BeanPicker';
@@ -13,6 +13,17 @@ interface Props {
   beans: Bean[];
   onSave: (draft: BrewDraft) => Promise<void> | void;
   defaultBeanId?: string;
+  // 'full' is the dedicated /brew page: starts with advanced fields shown
+  // (but the checkbox stays, so it can still collapse back to the quick
+  // set) and skips the "Quick Brew" heading, since the page already has
+  // its own title. 'quick' (the default, used on Home) shows a link to
+  // /brew instead of the checkbox - advanced fields are reached by
+  // navigating there, not toggled inline.
+  variant?: 'quick' | 'full';
+  // Carries an in-progress draft from Home's Quick Brew section over when
+  // navigating to /brew, so switching to the full form doesn't lose
+  // whatever was already typed in.
+  initialDraft?: DraftForm;
 }
 
 const DEFAULT_WATER_TEMP = 96;
@@ -23,7 +34,7 @@ const DEFAULT_BREW_TIME = 180;
 // directly with a `number | ''` union would collapse back to `number`
 // (the empty-string member has no overlap with BrewDraft's type), silently
 // losing the "blank input" case these form fields rely on.
-type DraftForm = Omit<
+export type DraftForm = Omit<
   BrewDraft,
   'bean_weight_g' | 'water_weight_g' | 'water_temp_c' | 'bloom_time_s' | 'total_brew_time_s'
 > & {
@@ -64,12 +75,14 @@ const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) 
   return unit === 'fahrenheit' ? Math.round((celsius * 9) / 5 + 32).toString() : celsius.toString();
 };
 
-export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
+export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', initialDraft }: Props) {
   const { preferences, setPreferredGrinder } = usePreferences();
-  const [isAdvanced, setIsAdvanced] = useState(false);
-  const [brewStyle, setBrewStyle] = useState<BrewStyle>('pour-over');
-  const [form, setForm] = useState<DraftForm>(() =>
-    makeDraft(defaultBeanId, 'pour-over', preferences.preferredGrinder)
+  const [isAdvanced, setIsAdvanced] = useState(variant === 'full');
+  const [brewStyle, setBrewStyle] = useState<BrewStyle>(
+    () => (initialDraft?.brew_style as BrewStyle | undefined) ?? 'pour-over'
+  );
+  const [form, setForm] = useState<DraftForm>(
+    () => initialDraft ?? makeDraft(defaultBeanId, 'pour-over', preferences.preferredGrinder)
   );
   const [waterTempInput, setWaterTempInput] = useState<string>('');
   const [saving, setSaving] = useState(false);
@@ -101,7 +114,12 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
     });
   }, [preferences.preferredGrinder]);
 
+  const isFirstBrewStyleRun = useRef(true);
   useEffect(() => {
+    if (isFirstBrewStyleRun.current) {
+      isFirstBrewStyleRun.current = false;
+      return;
+    }
     const preferredRatio = BREW_STYLE_PRESETS[brewStyle].ratios[0];
     setForm((prev) => {
       if (prev.bean_weight_g === '' || prev.water_weight_g === '') {
@@ -276,12 +294,12 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
   };
 
   return (
-    <section id="quick-log" className="journal-card px-6 py-8 text-espresso">
+    <section className="journal-card px-6 py-8 text-espresso">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.4em] text-moss">Log a brew</p>
+          {variant === 'quick' && <p className="text-xs uppercase tracking-[0.4em] text-moss">Log a brew</p>}
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-3xl font-display">Quick Brew</h2>
+            {variant === 'quick' && <h2 className="text-3xl font-display">Quick Brew</h2>}
             <label className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-moss">
               Style
               <select
@@ -299,18 +317,25 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <label className="flex items-center gap-2 text-moss">
-            <input
-              type="checkbox"
-              className="h-5 w-5 accent-ember"
-              checked={isAdvanced}
-              onChange={(e) => handleAdvancedToggle(e.target.checked)}
-            />
-            Advanced mode
-          </label>
-          <Link to="/brew" className="inline-flex min-h-11 items-center justify-center min-h-11 text-xs uppercase tracking-[0.3em] text-caramel">
-            Open full form
-          </Link>
+          {variant === 'full' ? (
+            <label className="flex items-center gap-2 text-moss">
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-ember"
+                checked={isAdvanced}
+                onChange={(e) => handleAdvancedToggle(e.target.checked)}
+              />
+              Advanced mode
+            </label>
+          ) : (
+            <Link
+              to="/brew"
+              state={{ draft: form }}
+              className="inline-flex min-h-11 items-center justify-center min-h-11 text-xs uppercase tracking-[0.3em] text-caramel"
+            >
+              Full Brew Log
+            </Link>
+          )}
           <button
             type="button"
             className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
@@ -421,7 +446,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
             </label>
           </div>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs uppercase tracking-[0.3em] text-moss">Quick notes</span>
+            <span className="text-xs uppercase tracking-[0.3em] text-moss">Notes</span>
             <textarea
               value={form.quick_notes}
               onChange={(event) => update('quick_notes', event.target.value)}
@@ -554,7 +579,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
             disabled={saving}
             className="rounded-full bg-ember px-6 py-3 font-semibold text-crema shadow-card disabled:opacity-60"
           >
-            {saving ? 'Saving...' : isAdvanced ? 'Save advanced brew' : 'Save quick brew'}
+            {saving ? 'Saving...' : variant === 'full' ? 'Save brew' : 'Save quick brew'}
           </button>
         </div>
       </form>
