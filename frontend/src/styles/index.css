@@ -53,6 +53,20 @@ body {
   pointer-events: none;
 }
 
+/* Browser spin buttons on the minute/second fields read as two tiny
+   scroll-wheels rather than a stopwatch-style split field - hidden in both
+   engines since neither pure CSS approach covers both on its own. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
 .paper-lines {
   background-image: repeating-linear-gradient(
     180deg,

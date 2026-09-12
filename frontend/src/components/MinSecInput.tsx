@@ -58,8 +58,12 @@ export function MinSecInput({ label, valueSeconds, onChange, hideLabel, compact 
   };
 
   const inputClass = compact
-    ? 'w-12 rounded border border-caramel/40 bg-white/80 px-1.5 py-1 text-espresso'
-    : 'w-16 rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema';
+    ? 'no-spinner w-12 rounded border border-caramel/40 bg-white/80 px-1.5 py-1 text-espresso'
+    // flex-1 rather than a fixed width: the sibling fields above and below
+    // (water temp, grinder, grind setting) stretch to fill the column via
+    // the parent label's flex layout, and a fixed w-16 here left this
+    // control looking like two small boxes floating in that same space.
+    : 'no-spinner min-w-0 flex-1 rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema';
 
   return (
     <label className="flex flex-col gap-1 text-sm">
