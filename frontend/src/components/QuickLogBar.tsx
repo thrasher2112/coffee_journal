@@ -4,8 +4,10 @@ import type { AromaTag, Bean, BrewDraft, FlavorTag } from '../types';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
 import { AromaTags } from './AromaTags';
+import { MinSecInput } from './MinSecInput';
 import { usePreferences } from '../contexts/PreferencesContext';
 import type { TemperatureUnit } from '../contexts/PreferencesContext';
+import { BREW_STYLE_PRESETS, type BrewStyle } from '../lib/brewStyles';
 
 interface Props {
   beans: Bean[];
@@ -13,26 +15,9 @@ interface Props {
   defaultBeanId?: string;
 }
 
-const BREW_STYLE_PRESETS = {
-  'pour-over': {
-    label: 'Pour over',
-    ratios: [15, 16, 17], // Hoffmann's V60 baseline (~60g/L) rounded to integer ratios
-  },
-  aeropress: {
-    label: 'Aeropress',
-    ratios: [17, 18, 19], // Hoffmann's championship AeroPress recipe sits around 1:18
-  },
-  'french-press': {
-    label: 'French press',
-    ratios: [13, 15, 17], // Hoffmann recommends 65–75g/L immersion brews ≈1:13–1:15
-  },
-} as const;
-
 const DEFAULT_WATER_TEMP = 96;
 const DEFAULT_BLOOM_TIME = 45;
 const DEFAULT_BREW_TIME = 180;
-
-type BrewStyle = keyof typeof BREW_STYLE_PRESETS;
 // Omit the numeric fields that allow a blank ('') input state before
 // re-adding them below — intersecting BrewDraft's plain `number` types
 // directly with a `number | ''` union would collapse back to `number`
@@ -184,21 +169,52 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
     });
   };
 
-  const addAgitation = () => {
-    update('agitation_events', [...form.agitation_events, { timestamp_s: 0, action: 'pour', amount_g: 50 }]);
+  // What's captured per row is the scale's running total, not the amount
+  // poured in that one event - that's what a person is actually looking at
+  // mid-brew. amount_g (what the backend stores) is derived from the
+  // difference against the previous row's total, kept in its own array
+  // rather than reverse-engineered from amount_g each time so an edit to an
+  // earlier row's total doesn't need any special-casing to ripple forward.
+  const [agitationTotals, setAgitationTotals] = useState<Array<number | ''>>([]);
+
+  const deriveAgitationAmounts = (totals: Array<number | ''>): Array<number | undefined> => {
+    let runningTotal = 0;
+    return totals.map((total) => {
+      if (total === '') return undefined;
+      const delta = total - runningTotal;
+      runningTotal = total;
+      return delta;
+    });
   };
 
-  const updateAgitation = (index: number, key: 'timestamp_s' | 'action' | 'amount_g', value: string) => {
+  const addAgitation = () => {
+    update('agitation_events', [...form.agitation_events, { timestamp_s: 0, action: 'pour', amount_g: undefined }]);
+    setAgitationTotals((prev) => [...prev, '']);
+  };
+
+  const updateAgitationTimestamp = (index: number, seconds: number | '') => {
     const events = [...form.agitation_events];
-    const nextValue =
-      key === 'timestamp_s' || key === 'amount_g'
-        ? value === ''
-          ? undefined
-          : Number(value)
-        : value;
-    const next = { ...events[index], [key]: nextValue };
-    events[index] = next;
+    events[index] = { ...events[index], timestamp_s: seconds === '' ? 0 : seconds };
     update('agitation_events', events);
+  };
+
+  const updateAgitationAction = (index: number, action: string) => {
+    const events = [...form.agitation_events];
+    events[index] = { ...events[index], action };
+    update('agitation_events', events);
+  };
+
+  const updateAgitationTotal = (index: number, value: string) => {
+    const nextTotal = value === '' ? '' : Number(value);
+    const totals = [...agitationTotals];
+    totals[index] = nextTotal;
+    setAgitationTotals(totals);
+
+    const amounts = deriveAgitationAmounts(totals);
+    update(
+      'agitation_events',
+      form.agitation_events.map((eventItem, i) => ({ ...eventItem, amount_g: amounts[i] }))
+    );
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -225,6 +241,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
       setForm(() => {
         const draft = makeDraft(form.bean_id, brewStyle, preferences.preferredGrinder);
         setWaterTempInput('');
+        setAgitationTotals([]);
         return draft;
       });
     } finally {
@@ -297,7 +314,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
           <button
             type="button"
             className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
-            onClick={() => setForm(makeDraft(defaultBeanId, brewStyle, preferences.preferredGrinder))}
+            onClick={() => {
+              setForm(makeDraft(defaultBeanId, brewStyle, preferences.preferredGrinder));
+              setAgitationTotals([]);
+            }}
           >
             Reset
           </button>
@@ -427,28 +447,16 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs uppercase tracking-[0.3em] text-moss">Bloom time (s)</span>
-                <input
-                  type="number"
-                  value={form.bloom_time_s === '' ? '' : form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
-                  onChange={(event) =>
-                    update('bloom_time_s', event.target.value === '' ? '' : Number(event.target.value))
-                  }
-                  className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs uppercase tracking-[0.3em] text-moss">Total brew time (s)</span>
-                <input
-                  type="number"
-                  value={form.total_brew_time_s === '' ? '' : form.total_brew_time_s ?? DEFAULT_BREW_TIME}
-                  onChange={(event) =>
-                    update('total_brew_time_s', event.target.value === '' ? '' : Number(event.target.value))
-                  }
-                  className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
-                />
-              </label>
+              <MinSecInput
+                label="Bloom time"
+                valueSeconds={form.bloom_time_s === '' ? '' : form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
+                onChange={(seconds) => update('bloom_time_s', seconds)}
+              />
+              <MinSecInput
+                label="Total brew time"
+                valueSeconds={form.total_brew_time_s === '' ? '' : form.total_brew_time_s ?? DEFAULT_BREW_TIME}
+                onChange={(seconds) => update('total_brew_time_s', seconds)}
+              />
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-xs uppercase tracking-[0.3em] text-moss">Grinder</span>
                 <select
@@ -487,38 +495,48 @@ export function QuickLogBar({ beans, onSave, defaultBeanId }: Props) {
                 </div>
                 <div className="mt-3 space-y-2">
                   {form.agitation_events.length > 0 && (
-                    <div className="grid grid-cols-3 gap-2 text-[10px] uppercase tracking-[0.2em] text-moss">
-                      <span>Time (s)</span>
+                    <div className="hidden gap-2 text-[10px] uppercase tracking-[0.2em] text-moss lg:grid lg:grid-cols-3">
+                      <span>Time</span>
                       <span>Action</span>
-                      <span>Amount (g)</span>
+                      <span>Total poured (g)</span>
                     </div>
                   )}
                   {form.agitation_events.map((event, index) => (
-                    <div key={index} className="grid grid-cols-3 gap-2 text-sm">
-                      <input
-                        type="number"
-                        value={event.timestamp_s ?? ''}
-                        placeholder="Time"
-                        onChange={(e) => updateAgitation(index, 'timestamp_s', e.target.value)}
-                        className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
-                        aria-label="Agitation time in seconds"
+                    <div
+                      key={index}
+                      className="grid grid-cols-1 gap-2 items-start rounded-lg border border-caramel/20 p-2 text-sm lg:grid-cols-3 lg:border-0 lg:p-0"
+                    >
+                      <MinSecInput
+                        label={`Agitation ${index + 1} time`}
+                        hideLabel
+                        compact
+                        valueSeconds={event.timestamp_s ?? ''}
+                        onChange={(seconds) => updateAgitationTimestamp(index, seconds)}
                       />
                       <input
                         type="text"
                         value={event.action ?? ''}
                         placeholder="Action (pour, stir)"
-                        onChange={(e) => updateAgitation(index, 'action', e.target.value)}
+                        onChange={(e) => updateAgitationAction(index, e.target.value)}
                         className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
                         aria-label="Agitation action"
                       />
-                      <input
-                        type="number"
-                        value={event.amount_g ?? ''}
-                        placeholder="Amount"
-                        onChange={(e) => updateAgitation(index, 'amount_g', e.target.value)}
-                        className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
-                        aria-label="Agitation amount in grams"
-                      />
+                      <div className="flex flex-col gap-0.5">
+                        <input
+                          type="number"
+                          value={agitationTotals[index] ?? ''}
+                          placeholder="Scale reading"
+                          onChange={(e) => updateAgitationTotal(index, e.target.value)}
+                          className="rounded border border-caramel/40 bg-white/80 px-2 py-1"
+                          aria-label="Total poured so far in grams"
+                        />
+                        {typeof event.amount_g === 'number' && (
+                          <span className="text-[10px] text-moss">
+                            {event.amount_g >= 0 ? '+' : ''}
+                            {event.amount_g}g this event
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {!form.agitation_events.length && (

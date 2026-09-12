@@ -3,6 +3,8 @@ import type { Brew } from '../types';
 import { AgitationTimeline } from './AgitationTimeline';
 import { clsx } from 'clsx';
 import { usePreferences } from '../contexts/PreferencesContext';
+import { formatMinSec } from '../lib/time';
+import { brewStyleLabel } from '../lib/brewStyles';
 
 interface Props {
   brew: Brew;
@@ -21,11 +23,20 @@ export function BrewCard({ brew }: Props) {
     return `${brew.water_temp_c}°C`;
   }, [brew.water_temp_c, preferences.temperatureUnit]);
 
+  const style = brewStyleLabel(brew.brew_style);
+
   return (
     <article className="journal-card relative overflow-hidden p-6 text-espresso">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-moss">{brew.date}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs uppercase tracking-[0.3em] text-moss">{brew.date}</p>
+            {style && (
+              <span className="rounded-full border border-moss/40 bg-moss/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] text-moss">
+                {style}
+              </span>
+            )}
+          </div>
           <h3 className="text-2xl font-display text-espresso">
             {brew.bean_name || 'Unknown Bean'}
           </h3>
@@ -88,11 +99,11 @@ export function BrewCard({ brew }: Props) {
             </div>
             <div className="flex justify-between border-b border-moss/30 py-1">
               <dt>Brew time</dt>
-              <dd>{brew.total_brew_time_s ? `${brew.total_brew_time_s}s` : '—'}</dd>
+              <dd>{brew.total_brew_time_s ? formatMinSec(brew.total_brew_time_s) : '—'}</dd>
             </div>
             <div className="flex justify-between border-b border-moss/30 py-1">
               <dt>Bloom</dt>
-              <dd>{brew.bloom_time_s ? `${brew.bloom_time_s}s` : '—'}</dd>
+              <dd>{brew.bloom_time_s ? formatMinSec(brew.bloom_time_s) : '—'}</dd>
             </div>
           </dl>
           <div className="space-y-2">

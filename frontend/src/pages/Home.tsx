@@ -63,6 +63,7 @@ export function HomePage() {
       bean_id: brew.bean_id ?? 'local-draft',
       bean_name: beans.find((b) => b.id === brew.bean_id)?.name ?? 'Local Draft',
       bean_weight_g: brew.bean_weight_g,
+      brew_style: brew.brew_style,
       grinder_name: brew.grinder_name,
       water_weight_g: brew.water_weight_g,
       date: brew.date,
