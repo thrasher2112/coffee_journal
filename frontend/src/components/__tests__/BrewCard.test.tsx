@@ -58,7 +58,7 @@ describe('BrewCard', () => {
 
   it('shows aroma and flavor ratings alongside the overall rating', () => {
     render(<BrewCard brew={{ ...baseBrew, rating: 9, aroma_rating: 7, flavor_rating: 8 }} />);
-    expect(screen.getByText('Rating').nextSibling).toHaveTextContent('9');
+    expect(screen.getByText('Overall').nextSibling).toHaveTextContent('9');
     expect(screen.getByText('Aroma').nextSibling).toHaveTextContent('7');
     expect(screen.getByText('Flavor').nextSibling).toHaveTextContent('8');
   });

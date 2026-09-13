@@ -25,7 +25,7 @@ const carriedDraft: DraftForm = {
   agitation_events: [],
   flavor_tags: [],
   aroma_tags: [],
-  quick_notes: 'Carried over from the quick form',
+  tasting_notes: 'Carried over from the quick form',
   rating: 9,
 };
 

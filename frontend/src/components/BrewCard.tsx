@@ -45,18 +45,21 @@ export function BrewCard({ brew }: Props) {
           </p>
           <p className="text-xs text-moss">ratio {brew.ratio ?? '-'}</p>
         </div>
-        <div className="flex items-end gap-4">
-          <div className="flex flex-col items-end">
-            <span className="text-xs uppercase tracking-[0.3em] text-moss">Aroma</span>
-            <span className="text-xl font-display text-ember">{brew.aroma_rating ?? '—'}</span>
+        <div className="grid w-40 shrink-0 grid-cols-3 overflow-hidden rounded border border-moss/30 text-center">
+          <div className="col-span-3 border-b border-moss/30 bg-moss/10 py-1 text-[9px] uppercase tracking-[0.2em] text-moss">
+            Ratings
           </div>
-          <div className="flex flex-col items-end">
-            <span className="text-xs uppercase tracking-[0.3em] text-moss">Flavor</span>
-            <span className="text-xl font-display text-ember">{brew.flavor_rating ?? '—'}</span>
+          <div className="flex flex-col items-center gap-0.5 border-r border-moss/30 py-1.5">
+            <span className="text-[9px] uppercase tracking-wide text-moss">Aroma</span>
+            <span className="text-lg font-display text-ember">{brew.aroma_rating ?? '—'}</span>
           </div>
-          <div className="flex flex-col items-end">
-            <span className="text-xs uppercase tracking-[0.3em] text-moss">Rating</span>
-            <span className="text-3xl font-display text-ember">{brew.rating ?? '—'}</span>
+          <div className="flex flex-col items-center gap-0.5 border-r border-moss/30 py-1.5">
+            <span className="text-[9px] uppercase tracking-wide text-moss">Flavor</span>
+            <span className="text-lg font-display text-ember">{brew.flavor_rating ?? '—'}</span>
+          </div>
+          <div className="flex flex-col items-center gap-0.5 py-1.5">
+            <span className="text-[9px] uppercase tracking-wide text-moss">Overall</span>
+            <span className="text-xl font-display text-ember">{brew.rating ?? '—'}</span>
           </div>
         </div>
       </div>

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QuickLogBar } from '../QuickLogBar';
-import type { Bean } from '../../types';
+import type { Bean, BrewDraft } from '../../types';
 
 vi.mock('../../contexts/PreferencesContext', () => ({
   usePreferences: () => ({
@@ -15,10 +15,10 @@ const beans: Bean[] = [
   { id: 'bean-1', name: 'Ethiopia', created_at: '', updated_at: '' },
 ];
 
-function renderForm(variant?: 'quick' | 'full') {
+function renderForm(variant?: 'quick' | 'full', onSave: (draft: BrewDraft) => void | Promise<void> = vi.fn()) {
   return render(
     <BrowserRouter>
-      <QuickLogBar beans={beans} onSave={vi.fn()} defaultBeanId="bean-1" variant={variant} />
+      <QuickLogBar beans={beans} onSave={onSave} defaultBeanId="bean-1" variant={variant} />
     </BrowserRouter>
   );
 }
@@ -52,6 +52,20 @@ describe('QuickLogBar variants', () => {
     renderForm();
     expect(screen.getByText('Notes')).toBeInTheDocument();
     expect(screen.queryByText('Quick notes')).not.toBeInTheDocument();
+  });
+
+  it('includes the typed notes text under tasting_notes in the saved payload', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    renderForm('full', onSave);
+
+    fireEvent.change(screen.getByLabelText('Notes'), {
+      target: { value: 'Tastes like blueberries' },
+    });
+    fireEvent.click(screen.getByText('Save brew'));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ tasting_notes: 'Tastes like blueberries' })
+    );
   });
 });
 

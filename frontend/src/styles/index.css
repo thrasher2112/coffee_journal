@@ -70,9 +70,12 @@ body {
 .paper-lines {
   background-image: repeating-linear-gradient(
     180deg,
-    rgba(86, 100, 93, 0.3) 0,
-    rgba(86, 100, 93, 0.3) 1px,
-    transparent 1px,
-    transparent 32px
+    transparent 0,
+    transparent 31px,
+    rgba(86, 100, 93, 0.3) 31px,
+    rgba(86, 100, 93, 0.3) 32px
   );
+  background-origin: content-box;
+  background-clip: content-box;
+  background-attachment: local;
 }

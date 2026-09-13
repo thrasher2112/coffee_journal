@@ -56,7 +56,7 @@ const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?
   agitation_events: [],
   flavor_tags: [],
   aroma_tags: [],
-  quick_notes: '',
+  tasting_notes: '',
   rating: 8,
   aroma_rating: 8,
   flavor_rating: 8,
@@ -450,9 +450,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Notes</span>
             <textarea
-              value={form.quick_notes}
-              onChange={(event) => update('quick_notes', event.target.value)}
-              className="paper-lines rounded-lg border border-caramel/40 bg-transparent px-3 py-2 text-espresso"
+              value={form.tasting_notes}
+              onChange={(event) => update('tasting_notes', event.target.value)}
+              className="paper-lines rounded-lg border border-caramel/40 bg-transparent px-3 py-2 text-espresso leading-[2rem]"
               rows={6}
             />
           </label>

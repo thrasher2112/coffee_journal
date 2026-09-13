@@ -74,7 +74,7 @@ export function HomePage() {
       total_brew_time_s: brew.total_brew_time_s,
       flavor_tags: brew.flavor_tags,
       aroma_tags: brew.aroma_tags,
-      tasting_notes: brew.quick_notes,
+      tasting_notes: brew.tasting_notes,
       rating: brew.rating,
       aroma_rating: brew.aroma_rating,
       flavor_rating: brew.flavor_rating,
