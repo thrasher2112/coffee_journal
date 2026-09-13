@@ -43,11 +43,21 @@ export function BrewCard({ brew }: Props) {
           <p className="text-sm text-moss">
             {(brew.bean_weight_g && brew.water_weight_g && `${brew.bean_weight_g}g → ${brew.water_weight_g}g`) || ''}
           </p>
+          <p className="text-xs text-moss">ratio {brew.ratio ?? '-'}</p>
         </div>
-        <div className="flex flex-col items-end">
-          <span className="text-xs uppercase tracking-[0.3em] text-moss">Rating</span>
-          <span className="text-3xl font-display text-ember">{brew.rating ?? '—'}</span>
-          <span className="text-xs text-moss">ratio {brew.ratio ?? '-'}</span>
+        <div className="flex items-end gap-4">
+          <div className="flex flex-col items-end">
+            <span className="text-xs uppercase tracking-[0.3em] text-moss">Aroma</span>
+            <span className="text-xl font-display text-ember">{brew.aroma_rating ?? '—'}</span>
+          </div>
+          <div className="flex flex-col items-end">
+            <span className="text-xs uppercase tracking-[0.3em] text-moss">Flavor</span>
+            <span className="text-xl font-display text-ember">{brew.flavor_rating ?? '—'}</span>
+          </div>
+          <div className="flex flex-col items-end">
+            <span className="text-xs uppercase tracking-[0.3em] text-moss">Rating</span>
+            <span className="text-3xl font-display text-ember">{brew.rating ?? '—'}</span>
+          </div>
         </div>
       </div>
 
@@ -90,7 +100,7 @@ export function BrewCard({ brew }: Props) {
         {expanded ? 'Hide details' : 'Show details'}
       </button>
 
-      <div className={clsx('transition-all', expanded ? 'max-h-80 opacity-100' : 'max-h-0 opacity-0')}>
+      <div className={clsx('transition-all', expanded ? 'max-h-[40rem] opacity-100' : 'max-h-0 opacity-0')}>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <dl className="text-sm text-espresso/80">
             <div className="flex justify-between border-b border-moss/30 py-1">
@@ -105,15 +115,16 @@ export function BrewCard({ brew }: Props) {
               <dt>Bloom</dt>
               <dd>{brew.bloom_time_s ? formatMinSec(brew.bloom_time_s) : '—'}</dd>
             </div>
-          </dl>
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs uppercase tracking-[0.3em] text-moss">
-              <span>Grinder</span>
-              <span>
-                {brew.grinder_name ?? '—'}
-                {brew.grind_setting ? ` (${brew.grind_setting})` : ''}
-              </span>
+            <div className="flex justify-between border-b border-moss/30 py-1">
+              <dt>Grinder</dt>
+              <dd>{brew.grinder_name ?? '—'}</dd>
             </div>
+            <div className="flex justify-between border-b border-moss/30 py-1">
+              <dt>Grind setting</dt>
+              <dd>{brew.grind_setting || '—'}</dd>
+            </div>
+          </dl>
+          <div>
             <AgitationTimeline events={brew.agitation_events ?? []} />
           </div>
         </div>

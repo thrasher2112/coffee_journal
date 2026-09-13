@@ -42,15 +42,29 @@ describe('BrewCard', () => {
     expect(screen.getByText('0:45')).toBeInTheDocument();
   });
 
-  it('shows the grind setting alongside the grinder name', () => {
+  it('shows grinder name and grind setting as separate rows', () => {
     render(<BrewCard brew={{ ...baseBrew, grinder_name: 'Baratza Encore', grind_setting: '18' }} />);
     fireEvent.click(screen.getByText('Show details'));
-    expect(screen.getByText('Baratza Encore (18)')).toBeInTheDocument();
+    expect(screen.getByText('Baratza Encore')).toBeInTheDocument();
+    expect(screen.getByText('18')).toBeInTheDocument();
   });
 
-  it('shows just the grinder name when no grind setting is recorded', () => {
+  it('falls back to an em dash when no grind setting is recorded', () => {
     render(<BrewCard brew={{ ...baseBrew, grinder_name: 'Baratza Encore' }} />);
     fireEvent.click(screen.getByText('Show details'));
     expect(screen.getByText('Baratza Encore')).toBeInTheDocument();
+    expect(screen.getByText('Grind setting').nextSibling).toHaveTextContent('—');
+  });
+
+  it('shows aroma and flavor ratings alongside the overall rating', () => {
+    render(<BrewCard brew={{ ...baseBrew, rating: 9, aroma_rating: 7, flavor_rating: 8 }} />);
+    expect(screen.getByText('Rating').nextSibling).toHaveTextContent('9');
+    expect(screen.getByText('Aroma').nextSibling).toHaveTextContent('7');
+    expect(screen.getByText('Flavor').nextSibling).toHaveTextContent('8');
+  });
+
+  it('shows the ratio under the bean/water weight line', () => {
+    render(<BrewCard brew={{ ...baseBrew, ratio: 16 }} />);
+    expect(screen.getByText('ratio 16')).toBeInTheDocument();
   });
 });
