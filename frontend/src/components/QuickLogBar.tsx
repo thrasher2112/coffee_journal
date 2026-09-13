@@ -45,10 +45,12 @@ export type DraftForm = Omit<
   total_brew_time_s?: number | '';
 };
 
+const DEFAULT_BEAN_WEIGHT_G = 18;
+
 const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?: string): DraftForm => ({
   bean_id: beanId,
-  bean_weight_g: 18,
-  water_weight_g: 288,
+  bean_weight_g: DEFAULT_BEAN_WEIGHT_G,
+  water_weight_g: Number((DEFAULT_BEAN_WEIGHT_G * BREW_STYLE_PRESETS[brewStyle].ratios[0]).toFixed(1)),
   brew_style: brewStyle,
   date: new Date().toISOString().slice(0, 10),
   agitation_events: [],
