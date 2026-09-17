@@ -1,0 +1,66 @@
+# Render blueprint for the single-container deploy.
+#
+# The database is deliberately NOT defined here: Render's own free Postgres
+# expires, so point DATABASE_URL at a Neon free database instead (it does not).
+#
+# Two values can only be filled in after Render assigns the service its URL, so
+# the first deploy is a two-step - see "Deploying" in README.md.
+services:
+  - type: web
+    name: coffee-journal
+    runtime: docker
+    # The branch Render tracks. Pinned explicitly because `main` does not yet
+    # carry this file or the root Dockerfile - without it a Blueprint looks at
+    # the repo default branch and finds nothing. Change to `main` once this is
+    # merged, or Render will keep deploying a stale feature branch.
+    branch: feat/mobile-pwa
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Neon connection string, pasted in exactly as Neon gives it. The app
+      # pins the psycopg3 driver itself (config.normalize_database_url), so
+      # there is no scheme to hand-edit.
+      - key: DATABASE_URL
+        sync: false
+      # Must be 32+ chars or the app refuses to boot. Generate with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: JWT_SECRET
+        sync: false
+      # Both are this service's own https URL, with no trailing slash. The app
+      # is single-origin, so they are the same value.
+      - key: FRONTEND_URL
+        sync: false
+      - key: API_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        value: Coffee Journal <onboarding@resend.dev>
+      - key: COOKIE_SECURE
+        value: "true"
+      # Render fronts every public service with Cloudflare by default, then its
+      # own internal load balancer relays to the container - three hops append
+      # to X-Forwarded-For: [client, Cloudflare edge, Render internal 10.x],
+      # confirmed by temporarily echoing the header from this exact deploy
+      # (see git history for GET /debug/xff). Getting this wrong doesn't fail
+      # loudly: too low reads a hop that churns per request (the Cloudflare
+      # and Render entries both change request to request), so every request
+      # looks like a new client and rate limiting - including the one on
+      # magic-link email - silently stops doing anything. Verified against
+      # the live deploy at each wrong value: 8 rapid requests all got 200 at
+      # hops=1, and still mostly got 200 at hops=2. Setting it higher than the
+      # real count is just as bad the other way, letting callers forge the
+      # header and choose their own bucket.
+      - key: TRUSTED_PROXY_HOPS
+        value: "3"
+      # Comma-separated addresses allowed to sign in. Leave this unset and
+      # anyone who finds the URL can create an account - sign-in is
+      # passwordless, so requesting a link IS registration. Set it to your own
+      # address for a personal deployment.
+      - key: ALLOWED_EMAILS
+        sync: false
+      # DEBUG and SEED_USER_EMAIL are intentionally absent. DEBUG unset keeps
+      # the production config guards armed; SEED_USER_EMAIL unset means no
+      # account is ever auto-created on a public deployment.

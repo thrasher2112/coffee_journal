@@ -39,3 +39,9 @@ Thumbs.db
 
 # Local docs
 docs/TO_DO.txt
+.neon
+
+# Agent skills scaffolded by `neon skills` - regenerable, not source.
+# Deliberately narrow so .claude/settings.json can still be committed.
+.claude/skills/
+skills-lock.json

@@ -1,7 +1,6 @@
 """Bean endpoints."""
 
 from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -11,7 +10,7 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..models.user import User
 from ..rate_limit import limiter
-from ..schemas.bean import BeanCreate, BeanRead, BeanUpdate, BeanListResponse
+from ..schemas.bean import BeanCreate, BeanListResponse, BeanRead, BeanUpdate
 
 router = APIRouter()
 
@@ -20,9 +19,9 @@ router = APIRouter()
 def list_beans(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    q: Optional[str] = Query(None, min_length=1),
-    first_used_after: Optional[date] = Query(None),
-    last_used_before: Optional[date] = Query(None),
+    q: str | None = Query(None, min_length=1),
+    first_used_after: date | None = Query(None),
+    last_used_before: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -97,7 +96,6 @@ def delete_bean(
     if not bean:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
     crud.bean.delete_bean(db, bean)
-    return None
 
 
 @router.post("/{bean_id}/copy", response_model=BeanRead, status_code=status.HTTP_201_CREATED)

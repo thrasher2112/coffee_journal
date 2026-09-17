@@ -60,6 +60,236 @@ Known Gaps / Next Steps
 - No media/photo attachments
 - Cupping sessions (multi-taster scoring) not built
 - Paginated import for very large datasets
-- Frontend has partial test coverage (auth flow, NavBar, preferences, api client tested;
-  QuickLogBar, Beans edit mode, import/export flows not yet covered)
+- Frontend has partial test coverage (auth flow + offline session fallback, NavBar incl.
+  the mobile tab bar, preferences, local brew store, api client tested; QuickLogBar,
+  Beans edit mode, import/export flows and the service worker not yet covered)
 - No admin tooling for managing users
+
+
+================================================================
+Modernization Pass (2026-08-27)
+================================================================
+
+Runtime / dependency upgrades
+- Python 3.11 -> 3.13 (Docker image); requires-python >=3.12, ruff target py312
+- Node 20 -> 24 (Dockerfile + CI)
+- Backend: fastapi 0.115->0.141, pydantic 2.9->2.13, sqlalchemy 2.0.34->2.0.52,
+  alembic 1.13->1.19, psycopg 3.2->3.3, pyjwt 2.9->2.13, resend 2.5->2.42,
+  slowapi 0.1.9->0.1.10, pytest 8->9, httpx 0.27->0.28, ruff 0.6->0.16
+- Frontend: react 18->19, react-router-dom 6->7, vite 5->8, tailwindcss 3->4,
+  vitest 2->4, typescript 5.6->7, plus testing-library/jsdom/chart.js bumps
+
+Breaking migrations handled
+- Tailwind v4 is CSS-first: tailwind.config.js DELETED; theme moved to an @theme
+  block in frontend/src/styles/index.css. PostCSS now uses @tailwindcss/postcss;
+  autoprefixer removed. All custom utilities verified present in compiled CSS.
+- TypeScript 7 dropped Node10 module resolution -> tsconfig uses "Bundler".
+- httpx 0.28 deprecated per-request cookies= -> set on client instance in tests.
+- ruff 0.16 expanded defaults: DTZ011 ignored (brew dates are local calendar
+  days, not timestamps); B008 scoped via extend-immutable-calls for FastAPI
+  Depends/Query.
+
+Bugs found and fixed during the upgrade
+- BrewUpdate.date could NEVER be updated. Under `from __future__ import
+  annotations`, the field name `date` shadowed the imported datetime.date, so
+  the annotation resolved to Optional[None] and every real date 422'd.
+  Fixed via `import datetime as dt`; regression test test_update_brew_date added.
+- QuickLogBar DraftForm used `BrewDraft & {bean_weight_g: number | ''}`, which
+  collapses to `number` — the blank-input state added in 06c3deb was invisible to
+  the type checker, and switching brew style with a blank weight zeroed the water
+  weight. Fixed with Omit<> plus a blank guard in the yield effect.
+- seed_db.py used SEED_USER_EMAIL "demo@coffee-journal.local"; EmailStr rejects
+  reserved TLDs, so the seeded account could never sign in. Now env-driven
+  (SEED_USER_EMAIL) with a valid default. Also fixed a duplicated dict pop that
+  mutated module-level SAMPLE_BREWS and made a second seed() call skip all brews.
+
+Test baseline: 71 backend (was 70), 17 frontend. ruff clean.
+
+Known gaps (carried forward + new)
+- Starlette 1.6 warns that TestClient with httpx is deprecated in favor of an
+  httpx2 package. Warning only; migrating the suite is a separate task.
+- legacy@coffee-journal.local (migration 20260325_08 backfill placeholder) keeps
+  its reserved TLD deliberately — that account should not be loggable.
+- Google Drive sync still a stub; no media attachments; no cupping sessions;
+  no admin tooling; frontend coverage still misses QuickLogBar / Beans edit /
+  import-export flows.
+
+
+================================================================
+Mobile / PWA + Deploy Pass (2026-09-06)
+================================================================
+
+Goal: make the app installable and usable on a phone, and deployable to a free
+host. Branch: feat/mobile-pwa.
+
+Architecture change - single origin
+- Production is now the ROOT Dockerfile: node builds the SPA, FastAPI serves it
+  from /app/static alongside /api. One container, one URL.
+- Why: the frontend used to bake VITE_API_URL into the bundle at build time,
+  defaulting to http://localhost:8000 - unusable anywhere but the build machine.
+  The API base is now relative (''). Single origin also keeps the session cookie
+  on SameSite=Lax and removes CORS.
+- docker-compose still builds the split backend/frontend images for local dev,
+  so vite HMR and uvicorn --reload are unchanged. Do not conflate the two.
+- The SPA fallback is a 404 exception handler, NOT a catch-all route. A
+  catch-all matches before Starlette's redirect_slashes and silently turned the
+  307 on /api/brews into a 404/405.
+- The CSP (default-src 'self') now covers the app HTML, so the Google Fonts CDN
+  is blocked. Fonts are self-hosted via @fontsource - this also makes them work
+  offline. Do not loosen the header; bundle new assets instead.
+
+PWA
+- Added icon set (192/512/maskable-512/apple-touch/favicon-32) generated from
+  frontend/public/icon.svg in the brand palette. Chrome needs >=192px PNG before
+  it offers "Install app"; the old manifest had only a 64px .ico.
+- manifest.json gained id/scope/orientation/description; start_url is "/".
+- index.html gained the apple-mobile-web-app-* tags (iOS ignores the manifest
+  for home-screen installs), theme-color, and viewport-fit=cover.
+
+Mobile UI
+- NavBar now renders a fixed bottom tab bar below md with safe-area padding.
+  Previously the nav was `hidden md:flex` with NO replacement, so a phone could
+  not reach Beans / All Cups / Best Cups / Settings, nor sign out.
+- Touch targets raised to min-h-11; body uses 100dvh; background-attachment
+  fixed removed (full repaint per scroll frame on iOS).
+
+Offline
+- api.ts throws NetworkError when a request never reached the API, distinct from
+  one that arrived and was rejected. Only NetworkError queues a brew or keeps a
+  cached session - a 422 queued as an outage would retry forever.
+- AuthContext caches the last known identity in localStorage so an offline
+  launch opens the journal instead of the login screen. Display-only: the
+  session is still the HttpOnly cookie and every call is authorised server-side.
+- useBrewSync/useAutoSync flush the queue on the online event, tab focus and
+  mount. Previously syncing only happened via a manual button in Settings.
+- sw.js v4: network-first navigations with an index.html fallback (client-side
+  routes have no file of their own), and install now parses index.html for the
+  hashed bundles - without them a first offline launch rendered an empty root.
+
+Deploy
+- render.yaml describes a free Render web service. No database in it on purpose:
+  Render's free Postgres expires, Neon's does not.
+- start.sh honours $PORT and passes --proxy-headers (needed to see the TLS
+  terminator's original https scheme).
+- config.normalize_database_url pins psycopg3 onto a bare postgresql:// URL, so
+  a provider connection string can be pasted in verbatim.
+- RESEND_FROM replaces a hardcoded sender on a domain we do not own (Resend
+  would have rejected every send).
+- .gitattributes pins *.sh to LF. A Windows checkout otherwise rewrites start.sh
+  with CRLF and the container dies with: env: 'bash
+': No such file or directory
+
+Bugs fixed
+- import_data reused row ids that belong to another user -> 500. Reachable from
+  the documented export/import migration. Now only replaces a genuinely taken
+  id, keeping free ids so a repeat import is idempotent.
+- Quick Log was an in-page anchor that did nothing off the home route.
+- "Open full form" was a bare <a href> causing a full page reload.
+- Home NavLink lacked `end`, so Home rendered active on every route.
+
+Verified
+- 78 backend tests, 22 frontend tests, ruff clean, tsc clean, prod build clean.
+- The production image was run against a throwaway Neon branch and exercised end
+  to end (auth, CRUD, multi-tenancy, export/import, PWA assets, CSP, redirects).
+
+Known gaps from this pass
+- Migration 20260325_08 creates legacy@coffee-journal.local on EVERY database,
+  including fresh ones. Inert - EmailStr rejects the reserved TLD so no magic
+  link can be requested - but it is noise, and the UUID is predictable
+  (...0001). Cleaning it up means a new migration; not done here.
+- Importing ANOTHER user's export twice still duplicates (ids are remapped each
+  time). Only your own export is idempotent. Would need a natural key to fix.
+
+
+================================================================
+Deployment, Security Audit + Account Data (2026-09-06 .. 09)
+================================================================
+
+The app is now deployed and running on a phone. Branch: feat/mobile-pwa.
+
+Deployment
+- Render web service (free), Docker runtime, root Dockerfile, tracking
+  feat/mobile-pwa. Neon free Postgres, which does NOT expire the way Render's
+  own free Postgres does. render.yaml describes the service but a Web Service
+  created by hand does not read it - every var must then be set manually.
+- Two-step first deploy: FRONTEND_URL and API_URL cannot be known until Render
+  assigns the URL. Until they are set, magic links point at localhost.
+- Diagnosing that is easier than it looks: CORS origins are built from those two
+  vars, so probing /health with an Origin header reads back the running config
+  without any dashboard access.
+- config.normalize_database_url pins psycopg3 onto a bare postgresql:// so a
+  provider string can be pasted in unedited. Getting this wrong used to kill the
+  app at boot with a ModuleNotFoundError naming nothing relevant.
+
+Security audit before going public - findings and fixes
+1. Magic-link tokens were written into the API's own access log. The link
+   carried the token in a query string, and single-origin means the SPA route is
+   served by the same uvicorn process that writes the log. Every sign-in logged
+   `GET /auth/verify?token=<live credential>`, replayable until it expired, with
+   no rate limit on /verify. Now in the URL fragment, which browsers never send.
+2. Tokens were stored in cleartext. magic_link_tokens was a table of live bearer
+   credentials. Only sha256 is stored now; column renamed token -> token_hash.
+   No salt or KDF - the input is 256 bits of secrets, so there is no dictionary
+   to attack - and no constant-time compare, since lookup is by hash and forging
+   a match needs the preimage.
+3. Open registration. Sign-in is passwordless, so requesting a link IS
+   registration. ALLOWED_EMAILS now gates request AND verify; the second is what
+   invalidates links already sent when someone is removed. Rejection returns the
+   same message as success, or the endpoint becomes an allowlist oracle.
+4. Expiry could extend. expires_at is DateTime(timezone=True) and
+   .replace(tzinfo=UTC) overwrote the offset instead of converting it, pushing
+   expiry LATER east of UTC - a 15-minute link stayed valid for hours.
+5. Rate-limit identity was caller-controlled. _get_real_ip took the FIRST
+   X-Forwarded-For entry; proxies append, so that entry is whatever the caller
+   sent. Every @limiter.limit was decorative. Now read from the right, taking
+   TRUSTED_PROXY_HOPS entries, ignored entirely at 0.
+   Follow-up: the first fix was incomplete. start.sh passed
+   --forwarded-allow-ips="*" unconditionally, so uvicorn rewrote
+   scope["client"] from the same header and the hops=0 fallback was still
+   spoofable. The flags are now passed only when hops > 0.
+
+Preferences moved onto the account
+- Temperature unit, grinder list and preferred grinder lived only in each
+  browser's localStorage: they did not follow the account and were lost when
+  site data was cleared. Three nullable columns on users (migration 11).
+- NULL means "never set on the server", deliberately distinct from "set to
+  empty": the client keeps its defaults until the user changes something, so the
+  first device to sign in seeds the account rather than a backfill overwriting
+  whatever each browser held.
+- Client pushes are gated on hydration completing, so a local value cannot
+  overwrite the account's before it has been read.
+
+Backup and restore
+- The Export/Import buttons only ever touched the offline queue: export wrote
+  `{localBrews: [...]}`, so a file saved as a backup contained none of the
+  journal. Export now downloads beans, brews and preferences plus any brews
+  still queued on the device; restore posts them back. Merging is by id, so
+  restoring the same file twice updates in place.
+- Removed "Push snapshot to API": it sent beans: [] alongside brews referencing
+  bean ids, so it 400'd for anything not already on the server, and Sync now
+  already does what it was attempting.
+
+Boot-time posture logging
+- ALLOWED_EMAILS and RESEND_API_KEY both fail silently when unset, and neither
+  is observable from outside. The app now states both at startup. Counts, never
+  addresses - the log is read in a hosting dashboard.
+
+Operational notes
+- Free Render instances sleep after ~15 min; first request takes ~50s. The
+  service worker paints the shell immediately while the backend wakes.
+- onboarding@resend.dev needs no domain verification but only delivers to your
+  own Resend account address, and lands in spam fairly often. It is also acting
+  as an accidental second gate on registration - verifying a domain removes it,
+  so confirm ALLOWED_EMAILS is set before doing that.
+- Neon free tier gives you no backup you control. Use Settings -> Back up.
+
+Known gaps carried forward
+- Migration 20260325_08 still creates legacy@coffee-journal.local on every
+  database. Inert (EmailStr rejects the reserved TLD) but it is noise.
+- Importing ANOTHER user's export twice still duplicates; only your own export
+  is idempotent. Would need a natural key.
+- No HSTS header. onrender.com is HSTS-preloaded so it does not matter today,
+  but it would on a custom domain.
+- Not merged to main. render.yaml pins branch: feat/mobile-pwa - change it, and
+  the branch in Render's dashboard, on merge.
+

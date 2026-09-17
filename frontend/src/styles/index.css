@@ -1,8 +1,25 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+@import 'tailwindcss';
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Tailwind v4 is CSS-first: theme customization that used to live in
+ * tailwind.config.js now lives here as CSS custom properties in the
+ * `--color-*` / `--font-*` / `--shadow-*` namespaces. These generate the
+ * corresponding utility classes (bg-night, text-crema, font-display,
+ * shadow-card, etc.) exactly like `theme.extend` did in v3.
+ */
+@theme {
+  --color-night: #1b1614;
+  --color-espresso: #3b2924;
+  --color-crema: #f8f1e8;
+  --color-caramel: #c89c73;
+  --color-moss: #56645d;
+  --color-ember: #a8563c;
+
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+
+  --shadow-card: 0 10px 35px rgba(0, 0, 0, 0.35);
+}
 
 :root {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -12,9 +29,11 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
+  /* `fixed` attachment forces a full repaint on every scroll frame in mobile
+     Safari; `100dvh` keeps the layout still as the browser chrome hides. */
   background: radial-gradient(circle at top, #2a1f1b 0%, #1b1614 55%, #120d0b 100%);
-  background-attachment: fixed;
+  background-repeat: no-repeat;
 }
 
 .journal-card {
@@ -34,12 +53,29 @@ body {
   pointer-events: none;
 }
 
+/* Browser spin buttons on the minute/second fields read as two tiny
+   scroll-wheels rather than a stopwatch-style split field - hidden in both
+   engines since neither pure CSS approach covers both on its own. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
 .paper-lines {
   background-image: repeating-linear-gradient(
     180deg,
-    rgba(86, 100, 93, 0.3) 0,
-    rgba(86, 100, 93, 0.3) 1px,
-    transparent 1px,
-    transparent 32px
+    transparent 0,
+    transparent 31px,
+    rgba(86, 100, 93, 0.3) 31px,
+    rgba(86, 100, 93, 0.3) 32px
   );
+  background-origin: content-box;
+  background-clip: content-box;
+  background-attachment: local;
 }

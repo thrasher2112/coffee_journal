@@ -79,6 +79,26 @@ def test_update_brew(auth_client):
     assert update_resp.json()["rating"] == 8
 
 
+def test_update_brew_date(auth_client):
+    """Regression test: BrewUpdate.date must accept a real date, not just None."""
+    bean_id = _create_bean(auth_client)
+    create_resp = auth_client.post(
+        "/api/brews/",
+        json={
+            "date": date.today().isoformat(),
+            "bean_id": bean_id,
+            "bean_weight_g": 18,
+            "water_weight_g": 288,
+        },
+    )
+    brew_id = create_resp.json()["id"]
+
+    new_date = (date.today() - timedelta(days=2)).isoformat()
+    update_resp = auth_client.put(f"/api/brews/{brew_id}", json={"date": new_date})
+    assert update_resp.status_code == 200
+    assert update_resp.json()["date"] == new_date
+
+
 def test_delete_brew(auth_client):
     bean_id = _create_bean(auth_client)
     create_resp = auth_client.post(

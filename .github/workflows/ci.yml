@@ -1,10 +1,11 @@
 name: CI
 
 on:
+  # Feature branches were previously unchecked: CI only ran once work reached
+  # main, which is exactly too late for it to catch anything.
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**', 'chore/**']
   pull_request:
-    branches: [main]
 
 jobs:
   backend-lint:
@@ -16,8 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install ruff==0.6.5
+          python-version: "3.13"
+      - run: pip install ruff==0.16.5
       - run: ruff check src tests
 
   backend-test:
@@ -29,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - run: pip install -r requirements.txt
       - run: python -m pytest --tb=short
 
@@ -42,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - run: npm ci
       - run: npx vitest run
 
@@ -55,6 +56,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - run: npm ci
       - run: npm run build

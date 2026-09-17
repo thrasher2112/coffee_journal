@@ -1,46 +1,45 @@
 """Pydantic schemas for Brew resources."""
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import List, Optional
+import datetime as dt
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AgitationEvent(BaseModel):
     timestamp_s: int
     action: str = Field(..., max_length=100)
-    amount_g: Optional[float] = None
+    amount_g: float | None = None
 
 
-def _dedupe_tags(value: Optional[List[str]]):
+def _dedupe_tags(value: list[str] | None):
     if not value:
         return value
     return sorted({tag.strip() for tag in value if tag})
 
 
 class BrewBase(BaseModel):
-    date: date
+    date: dt.date
     bean_id: str
     bean_weight_g: float = Field(..., gt=0)
     water_weight_g: float = Field(..., gt=0)
-    brew_style: Optional[str] = Field(None, max_length=50)
-    grind_setting: Optional[str] = Field(None, max_length=120)
-    grind_setting_notes: Optional[str] = Field(None, max_length=2000)
-    grinder_name: Optional[str] = Field(None, max_length=120)
-    water_temp_c: Optional[int] = Field(None)
-    bloom_time_s: Optional[int] = Field(None)
-    total_brew_time_s: Optional[int] = Field(None)
-    agitation_events: Optional[List[AgitationEvent]] = Field(None, max_length=100)
-    tasting_notes: Optional[str] = Field(None, max_length=5000)
-    flavor_tags: Optional[List[str]] = Field(None, max_length=50)
-    aroma_tags: Optional[List[str]] = Field(None, max_length=50)
-    rating: Optional[int] = Field(None, ge=1, le=10)
-    aroma_rating: Optional[int] = Field(None, ge=1, le=10)
-    flavor_rating: Optional[int] = Field(None, ge=1, le=10)
+    brew_style: str | None = Field(None, max_length=50)
+    grind_setting: str | None = Field(None, max_length=120)
+    grind_setting_notes: str | None = Field(None, max_length=2000)
+    grinder_name: str | None = Field(None, max_length=120)
+    water_temp_c: int | None = Field(None)
+    bloom_time_s: int | None = Field(None)
+    total_brew_time_s: int | None = Field(None)
+    agitation_events: list[AgitationEvent] | None = Field(None, max_length=100)
+    tasting_notes: str | None = Field(None, max_length=5000)
+    flavor_tags: list[str] | None = Field(None, max_length=50)
+    aroma_tags: list[str] | None = Field(None, max_length=50)
+    rating: int | None = Field(None, ge=1, le=10)
+    aroma_rating: int | None = Field(None, ge=1, le=10)
+    flavor_rating: int | None = Field(None, ge=1, le=10)
 
     @field_validator("flavor_tags", "aroma_tags")
-    def dedupe_tags(cls, value: Optional[List[str]]):
+    def dedupe_tags(cls, value: list[str] | None):
         return _dedupe_tags(value)
 
 
@@ -49,64 +48,71 @@ class BrewCreate(BrewBase):
 
 
 class BrewUpdate(BaseModel):
-    date: Optional[date] = None
-    bean_id: Optional[str] = None
-    bean_weight_g: Optional[float] = Field(None, gt=0)
-    water_weight_g: Optional[float] = Field(None, gt=0)
-    brew_style: Optional[str] = Field(None, max_length=50)
-    grind_setting: Optional[str] = Field(None, max_length=120)
-    grind_setting_notes: Optional[str] = Field(None, max_length=2000)
-    grinder_name: Optional[str] = Field(None, max_length=120)
-    water_temp_c: Optional[int] = Field(None)
-    bloom_time_s: Optional[int] = Field(None)
-    total_brew_time_s: Optional[int] = Field(None)
-    agitation_events: Optional[List[AgitationEvent]] = Field(None, max_length=100)
-    tasting_notes: Optional[str] = Field(None, max_length=5000)
-    flavor_tags: Optional[List[str]] = Field(None, max_length=50)
-    aroma_tags: Optional[List[str]] = Field(None, max_length=50)
-    rating: Optional[int] = Field(None, ge=1, le=10)
-    aroma_rating: Optional[int] = Field(None, ge=1, le=10)
-    flavor_rating: Optional[int] = Field(None, ge=1, le=10)
+    date: dt.date | None = None
+    bean_id: str | None = None
+    bean_weight_g: float | None = Field(None, gt=0)
+    water_weight_g: float | None = Field(None, gt=0)
+    brew_style: str | None = Field(None, max_length=50)
+    grind_setting: str | None = Field(None, max_length=120)
+    grind_setting_notes: str | None = Field(None, max_length=2000)
+    grinder_name: str | None = Field(None, max_length=120)
+    water_temp_c: int | None = Field(None)
+    bloom_time_s: int | None = Field(None)
+    total_brew_time_s: int | None = Field(None)
+    agitation_events: list[AgitationEvent] | None = Field(None, max_length=100)
+    tasting_notes: str | None = Field(None, max_length=5000)
+    flavor_tags: list[str] | None = Field(None, max_length=50)
+    aroma_tags: list[str] | None = Field(None, max_length=50)
+    rating: int | None = Field(None, ge=1, le=10)
+    aroma_rating: int | None = Field(None, ge=1, le=10)
+    flavor_rating: int | None = Field(None, ge=1, le=10)
 
     @field_validator("flavor_tags", "aroma_tags")
-    def dedupe_tags(cls, value: Optional[List[str]]):
+    def dedupe_tags(cls, value: list[str] | None):
         return _dedupe_tags(value)
 
 
 class BrewRead(BrewBase):
     id: str
-    created_at: datetime
-    updated_at: datetime
-    ratio: Optional[float]
-    bean_name: Optional[str] = None
+    created_at: dt.datetime
+    updated_at: dt.datetime
+    ratio: float | None
+    bean_name: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
 class BrewListResponse(BaseModel):
-    items: List[BrewRead]
+    items: list[BrewRead]
     total: int
 
 
 class MetricsOverview(BaseModel):
-    top_beans: List[dict]
-    recent_brews: List[dict]
-    rating_trends: List[dict]
+    top_beans: list[dict]
+    recent_brews: list[dict]
+    rating_trends: list[dict]
 
 
 class ExportPayload(BaseModel):
-    beans: List["BeanRead"]
-    brews: List[BrewRead]
+    beans: list[BeanRead]
+    brews: list[BrewRead]
+    # Preferences live on the account now, so a backup that omitted them would
+    # not actually restore everything.
+    preferences: PreferencesRead | None = None
 
 
 class ImportPayload(BaseModel):
-    beans: List["BeanImport"] = Field(default_factory=list, max_length=500)
-    brews: List["BrewImport"] = Field(default_factory=list, max_length=2000)
+    beans: list[BeanImport] = Field(default_factory=list, max_length=500)
+    brews: list[BrewImport] = Field(default_factory=list, max_length=2000)
+    # Optional so older backup files, written before preferences were stored
+    # server-side, still import cleanly.
+    preferences: PreferencesUpdate | None = None
 
 
 class BrewImport(BrewCreate):
-    id: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    id: str | None = None
+    created_at: dt.datetime | None = None
+    updated_at: dt.datetime | None = None
 
 
-from .bean import BeanRead, BeanImport  # noqa: E402  (circular reference resolution)
+from .bean import BeanImport, BeanRead
+from .user import PreferencesRead, PreferencesUpdate

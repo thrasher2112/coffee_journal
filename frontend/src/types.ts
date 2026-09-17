@@ -94,7 +94,6 @@ export interface BrewDraft {
   rating?: number;
   aroma_rating?: number;
   flavor_rating?: number;
-  quick_notes?: string;
 }
 
 export interface LocalBrew extends BrewDraft {

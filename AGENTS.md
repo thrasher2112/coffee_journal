@@ -9,15 +9,15 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
 ├── AGENTS.md
 ├── backend/
 │   ├── src/coffee_journal/
-│   │   ├── main.py          # CORS, security headers middleware, app factory
+│   │   ├── main.py          # CORS, security headers, SPA serving, boot posture log
 │   │   ├── config.py        # Settings dataclass (env vars + production guards)
 │   │   ├── auth.py          # Magic links, JWT, session revocation
 │   │   ├── email.py         # Resend / console fallback
-│   │   ├── rate_limit.py    # Shared slowapi Limiter instance
+│   │   ├── rate_limit.py    # Shared slowapi Limiter (trusted-hop client key)
 │   │   ├── models/          # SQLAlchemy ORM models
 │   │   ├── schemas/         # Pydantic v2 schemas (input limits)
 │   │   ├── crud/            # DB helpers
-│   │   └── routers/         # beans, brews, auth, metrics, data
+│   │   └── routers/         # beans, brews, auth, metrics, data, preferences
 │   ├── alembic/versions/    # DB migrations
 │   ├── tests/               # pytest suites
 │   └── pyproject.toml       # ruff + pytest config
@@ -26,8 +26,11 @@ Coffee Journal ships as a FastAPI backend (`backend/`) and a Vite/React frontend
 │       ├── pages/           # Login, AuthVerify, Home, Beans, AllCups, BestCups, Settings
 │       ├── components/      # NavBar, ProtectedRoute, QuickLogBar, BrewCard, …
 │       ├── contexts/        # AuthContext, PreferencesContext
-│       ├── hooks/           # useLocalBrewStore
+│       ├── hooks/           # useLocalBrewStore, useBrewSync
+│       ├── styles/index.css # Tailwind v4 @theme (replaces tailwind.config.js)
 │       └── lib/api.ts       # All API calls
+├── Dockerfile               # Production image: one container, API + built SPA
+├── render.yaml              # Render blueprint
 ├── .github/workflows/ci.yml # CI: lint + test + build
 ├── docker-compose.yml
 ├── docker-compose.override.yml
@@ -74,7 +77,13 @@ make api-test
 make api-test-auth   # auth + multi-tenant only
 make frontend-test
 make lint            # ruff check
+
+# Natively (Python 3.12+ / Node 24+) — faster, and backend tests need no database
+cd backend  && python -m pytest tests/ -q
+cd frontend && npx vitest run
 ```
+
+Current baseline: **103 backend tests, 32 frontend tests**, ruff clean (CI lints `src tests`).
 
 Keep regression coverage when touching routers, CRUD helpers, or auth logic.
 
@@ -86,6 +95,14 @@ causing `PydanticUndefinedAnnotation` at startup. This applies to all files unde
 `routers/`. All other modules can use it freely.
 
 **Pydantic v2**: `Optional[T]` fields without `= None` are treated as required. Always add `= None`.
+
+**Never name a Pydantic field the same as the type it is annotated with.** In modules that use
+`from __future__ import annotations`, the class body's assignment shadows the imported type before
+Pydantic resolves the (string) annotation. `date: Optional[date] = None` silently resolves to
+`Optional[None]`, so the field rejects every real value with "Input should be None" — this shipped
+undetected in `BrewUpdate` and made `PUT /api/brews/{id}` unable to change a brew's date. Import the
+module instead and qualify the annotation (`import datetime as dt` → `dt.date`), as `schemas/brew.py`
+now does.
 
 **Rate limiter**: there is one shared `Limiter` in `rate_limit.py`. Never create a second instance
 in a router — import from `rate_limit` instead. In tests, `limiter.enabled = False` is set in
@@ -104,10 +121,42 @@ not by counting cascaded row deletions.
 **dependency_overrides is global**: use the `make_client(user)` factory fixture for multi-tenant
 tests so each client has the correct user injected.
 
+**Never put a catch-all route in front of the API.** The SPA fallback in `main.py` is a
+`@app.exception_handler(404)`, not a `@app.get("/{full_path:path}")`. A catch-all matches
+during routing, before Starlette's `redirect_slashes` runs, which silently turned the 307 on
+`/api/brews` → `/api/brews/` into a 404 (GET) and a 405 (POST). The frontend happened to use
+trailing slashes so nothing broke visibly. A 404 handler runs only after routing has already
+failed, so redirects and 405s behave exactly as they do with no frontend attached.
+
+**The CSP now covers the SPA, not just API JSON.** `main.py` sends
+`default-src 'self'` on every response, including the app HTML the API serves. Any CDN asset
+is blocked outright with no visible error - this is why fonts are self-hosted via
+`@fontsource/*` in `main.tsx` rather than imported from Google Fonts. Bundle new assets;
+do not loosen the header.
+
+**The frontend API base must stay relative.** `api.ts` defaults `API_URL` to `''` so requests
+go to `/api/...` on whatever origin served the app. Setting `VITE_API_URL` bakes an absolute
+host into the bundle at build time, which is what made earlier builds work only on the machine
+that built them. Use it only for a genuinely split-origin deploy.
+
+**`DATABASE_URL` is normalised, not validated.** `config.normalize_database_url` rewrites a
+bare `postgresql://` or `postgres://` to `postgresql+psycopg://`. Every managed provider
+(Neon, Render, Railway, Supabase) hands out the bare form, and SQLAlchemy reads that as
+psycopg2 - which is not installed, so an unedited paste used to kill the app at boot with a
+`ModuleNotFoundError` naming nothing relevant. An explicit driver is left untouched.
+
+**Shell scripts must stay LF.** `.gitattributes` forces `eol=lf` on `*.sh` and `Dockerfile`.
+Without it a Windows checkout (`core.autocrlf=true`) rewrites `start.sh` with CRLF and the
+container dies at startup with `env: 'bash
+': No such file or directory`.
+
 ## Coding Standards
 
 - **Python**: Black/PEP8, SQLAlchemy 2.0 style, Pydantic v2 `model_validate`/`model_dump`
 - **TypeScript/React**: functional components, hooks, Tailwind utilities
+- **Tailwind v4 is CSS-first**: there is no `tailwind.config.js`. The theme (colors `night`,
+  `espresso`, `crema`, `caramel`, `moss`, `ember`; `font-display`/`font-body`; `shadow-card`)
+  lives in the `@theme` block of `frontend/src/styles/index.css`. Add new design tokens there.
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`)
 - When adding a field to Brew or Bean: wire it through the model, migration, schema, CRUD, router, and frontend types/API client
 
@@ -115,11 +164,35 @@ tests so each client has the correct user injected.
 
 - Never commit `.env` files (already `.gitignore`d)
 - Never log or include the raw magic link token in responses — it goes to email/logs only
+- Magic link tokens are stored as a SHA-256 hash (`auth.hash_magic_link_token`); the raw
+  value exists only in the email. Never persist or log it, and never add a lookup by raw token
+- The sign-in link carries the token in the URL **fragment** (`/auth/verify#token=...`), never
+  the query string. The SPA and API share an origin, so a query string is written verbatim into
+  the API's own access log on every sign-in and stays replayable until it expires
+- `ALLOWED_EMAILS` gates `request_magic_link` AND `verify_magic_link_token`. Both are needed:
+  the second invalidates links already sent when someone is removed. Rejection must return the
+  same message as success, or the endpoint becomes an allowlist oracle
 - All protected endpoints must use `Depends(get_current_user)`
 - All CRUD functions must accept and filter by `user_id`
 - New `setattr`-based update functions must use a field allowlist (`_BEAN_MUTABLE_FIELDS` / `_BREW_MUTABLE_FIELDS` pattern)
+- The one deliberate exception to user-scoped lookups is `routers/data.py::_id_taken`, which
+  checks whether a primary key is in use by *any* user. Ids are globally unique, so this is
+  the only way import can tell "free to reuse" from "belongs to someone else". It returns a
+  boolean for an id the caller already supplied and reads no row data. Do not generalise it.
 - Search strings passed to LIKE must be escaped (see `crud/bean.py` for the pattern)
 - New endpoints that create or modify data should have a `@limiter.limit(...)` decorator
+- `start.sh` passes `--proxy-headers --forwarded-allow-ips` ONLY when `TRUSTED_PROXY_HOPS > 0`.
+  Passing it unconditionally lets uvicorn rewrite `scope["client"]` from a caller-supplied
+  header, which made `_get_real_ip`'s fallback attacker-controlled and bypassed every limit
+  at the default `TRUSTED_PROXY_HOPS=0`. Verified by rotating the header against both settings
+- Rate limiting keys on `X-Forwarded-For` read from the RIGHT (`rate_limit._get_real_ip`),
+  and only as many hops as `TRUSTED_PROXY_HOPS` says actually exist. Proxies append, so the
+  leftmost entry is caller-supplied: reading it (as this once did) let anyone mint a fresh
+  bucket per request and made every `@limiter.limit` decorative. Never raise
+  `TRUSTED_PROXY_HOPS` above the real proxy count
+- Never give an account-creating script a default email address. Sign-in is by magic
+  link, so any hardcoded address is an account whoever controls that domain's mailbox
+  can claim. `seed_db.py` requires `SEED_USER_EMAIL` and skips seeding when unset.
 
 ## Ops Notes
 
@@ -128,3 +201,8 @@ tests so each client has the correct user injected.
 - `docker compose down -v` drops the Postgres volume — data is lost
 - `JWT_EXPIRY_HOURS=24` by default; the dev `.env.example` leaves it at 24
 - In production: set `DEBUG=false`, `JWT_SECRET` (32+ chars), `COOKIE_SECURE=true`, `COOKIE_DOMAIN`
+- Production is the **root `Dockerfile`**: one container, node builds the SPA into `/app/static`
+  and FastAPI serves it same-origin. `docker-compose` still uses the split
+  `backend/`+`frontend/` Dockerfiles for local dev — do not conflate the two.
+- `start.sh` honours `$PORT` (managed hosts inject it) and passes `--proxy-headers`, without
+  which the app cannot see the TLS terminator's original https scheme.

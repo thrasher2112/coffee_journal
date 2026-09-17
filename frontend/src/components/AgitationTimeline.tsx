@@ -1,4 +1,5 @@
 import type { AgitationEvent } from '../types';
+import { formatMinSec } from '../lib/time';
 
 interface Props {
   events: AgitationEvent[];
@@ -19,7 +20,7 @@ export function AgitationTimeline({ events }: Props) {
         {events.map((event, idx) => (
           <li key={`${event.timestamp_s}-${idx}`} className="flex items-center justify-between">
             <span>
-              {event.timestamp_s}s · {event.action}
+              {formatMinSec(event.timestamp_s)} · {event.action}
             </span>
             {event.amount_g && <span>{event.amount_g}g</span>}
           </li>

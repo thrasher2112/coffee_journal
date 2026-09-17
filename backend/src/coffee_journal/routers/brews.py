@@ -1,7 +1,6 @@
 """Brew endpoints."""
 
 from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -11,7 +10,7 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..models.user import User
 from ..rate_limit import limiter
-from ..schemas.brew import BrewCreate, BrewRead, BrewUpdate, BrewListResponse
+from ..schemas.brew import BrewCreate, BrewListResponse, BrewRead, BrewUpdate
 
 router = APIRouter()
 
@@ -27,9 +26,9 @@ def _to_schema(brew) -> BrewRead:
 def list_brews(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    bean_id: Optional[str] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    bean_id: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -90,11 +89,8 @@ def update_brew(
     if not brew:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brew not found")
     # If bean_id is being changed, verify ownership of the new bean
-    if payload.bean_id is not None:
-        if not crud.bean.get_bean(db, payload.bean_id, current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found"
-            )
+    if payload.bean_id is not None and not crud.bean.get_bean(db, payload.bean_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bean not found")
     brew = crud.brew.update_brew(db, brew, payload.model_dump(exclude_unset=True))
     db.refresh(brew, attribute_names=["bean"])
     return _to_schema(brew)
@@ -110,4 +106,3 @@ def delete_brew(
     if not brew:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brew not found")
     crud.brew.delete_brew(db, brew)
-    return None

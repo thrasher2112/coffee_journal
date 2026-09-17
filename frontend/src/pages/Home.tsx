@@ -5,7 +5,7 @@ import { QuickLogBar } from '../components/QuickLogBar';
 import { BrewCard } from '../components/BrewCard';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
 import type { Bean, Brew, MetricsOverview, BrewDraft } from '../types';
-import { createBrew, fetchBeans, fetchBrews, fetchMetrics } from '../lib/api';
+import { createBrew, fetchBeans, fetchBrews, fetchMetrics, NetworkError } from '../lib/api';
 import { SAMPLE_BEANS, SAMPLE_BREWS, SAMPLE_METRICS } from '../lib/sampleData';
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler);
@@ -41,9 +41,18 @@ export function HomePage() {
     try {
       await createBrew(draft);
       await load();
+      setError(null);
     } catch (err) {
-      console.warn('Saving locally', err);
-      addBrew(draft);
+      // Only queue when the request never landed. A rejected payload (422) or a
+      // dead session (401) would otherwise sit in the queue retrying forever.
+      if (err instanceof NetworkError) {
+        console.warn('Offline - queued locally', err);
+        addBrew(draft);
+        setError('Offline — brew saved locally and will sync when you reconnect.');
+      } else {
+        console.error('Failed to save brew', err);
+        setError('Could not save that brew. Check the values and try again.');
+      }
     }
   };
 
@@ -54,6 +63,7 @@ export function HomePage() {
       bean_id: brew.bean_id ?? 'local-draft',
       bean_name: beans.find((b) => b.id === brew.bean_id)?.name ?? 'Local Draft',
       bean_weight_g: brew.bean_weight_g,
+      brew_style: brew.brew_style,
       grinder_name: brew.grinder_name,
       water_weight_g: brew.water_weight_g,
       date: brew.date,
@@ -64,7 +74,7 @@ export function HomePage() {
       total_brew_time_s: brew.total_brew_time_s,
       flavor_tags: brew.flavor_tags,
       aroma_tags: brew.aroma_tags,
-      tasting_notes: brew.quick_notes,
+      tasting_notes: brew.tasting_notes,
       rating: brew.rating,
       aroma_rating: brew.aroma_rating,
       flavor_rating: brew.flavor_rating,

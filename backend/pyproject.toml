@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "coffee-journal"
 version = "0.1.0"
 description = "Coffee tasting journal powered by FastAPI and Postgres"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 readme = "README.md"
 authors = [{name = "Coffee Journal Maintainers"}]
 dependencies = []
@@ -19,5 +19,21 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "tests"]
+
+[tool.ruff.lint]
+# ruff 0.16's expanded default rule set flags two patterns that are
+# intentional in this codebase rather than bugs:
+#   DTZ011 - date.today() is used for plain calendar-date fields (brew/bean
+#            "date"), which intentionally reflects the caller's local
+#            calendar day. Swapping to datetime.now(tz=...).date() would
+#            tie the value to a fixed timezone and could shift the
+#            recorded date for users outside it.
+extend-ignore = ["DTZ011"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection pattern requires calling Depends()/Query()
+# in argument defaults; this is not the mutable-default-argument bug B008
+# otherwise guards against.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
