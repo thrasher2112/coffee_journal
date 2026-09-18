@@ -10,7 +10,6 @@ A personal coffee brewing journal with passwordless authentication, multi-tenant
 [![CI](https://github.com/thrasher2112/coffee_journal/actions/workflows/ci.yml/badge.svg)](https://github.com/thrasher2112/coffee_journal/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Live demo**: <https://coffee-journal-uijs.onrender.com> (free tier — sleeps after ~15 min idle, takes ~50s to wake on first load)
 
 ---
 
