@@ -1,4 +1,4 @@
-"""Import/export + sync stubs."""
+"""Import/export."""
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -13,7 +13,6 @@ from ..rate_limit import limiter
 from ..schemas.bean import BeanRead
 from ..schemas.brew import BrewRead, ExportPayload, ImportPayload
 from ..schemas.user import PreferencesRead
-from ..sync.google_drive import GoogleDriveSyncStub
 
 router = APIRouter()
 
@@ -32,9 +31,6 @@ def _id_taken(db: Session, model, row_id: str | None) -> bool:
         db.execute(select(model.id).where(model.id == row_id).limit(1)).first()
         is not None
     )
-
-
-gdrive_stub = GoogleDriveSyncStub()
 
 
 @router.get("/export", response_model=ExportPayload)
@@ -150,10 +146,3 @@ def import_data(
             crud.brew.create_brew(db, data)
         imported["brews"] += 1
     return {"status": "imported", "counts": imported}
-
-
-@router.post("/sync/google-drive", status_code=status.HTTP_202_ACCEPTED)
-def sync_with_google_drive(current_user: User = Depends(get_current_user)):
-    """Placeholder endpoint for future OAuth based Google Drive sync."""
-    gdrive_stub.enqueue_sync()
-    return {"status": "queued", "provider": "google_drive"}

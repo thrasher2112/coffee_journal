@@ -98,7 +98,7 @@ npm run build        # production bundle
 - `GET/POST /api/brews`
   - Brew payloads support `grinder_name`, `grind_setting`, `aroma_rating`, `flavor_rating`, and `aroma_tags` in addition to the existing fields.
 - `GET /api/metrics/overview` (top beans, recent brews, rating trend)
-- `GET /export`, `POST /import`, `POST /sync/google-drive`
+- `GET /export`, `POST /import`
 - `GET /health`
 
 See `/docs` for the full OpenAPI schema.

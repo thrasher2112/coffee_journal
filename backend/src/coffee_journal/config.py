@@ -61,10 +61,12 @@ class Settings:
 
     # How many proxies sit in front of the app and append to X-Forwarded-For.
     # 0 (the default) means the app is reached directly, so that header is
-    # attacker-controlled input and is ignored for rate limiting. Render adds
-    # exactly one hop; a CDN in front of it would make this 2. Setting this
-    # higher than the real hop count lets callers forge their rate-limit
-    # identity, so it must match the deployment.
+    # attacker-controlled input and is ignored for rate limiting. Render needs
+    # 3 (Cloudflare, which fronts every public service by default, then
+    # Render's own internal load balancer, then one more - confirmed against
+    # the live X-Forwarded-For chain). Setting this higher than the real hop
+    # count lets callers forge their rate-limit identity, so it must match
+    # the deployment.
     trusted_proxy_hops: int = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
 
     # Comma-separated addresses permitted to sign in. Empty means anyone who

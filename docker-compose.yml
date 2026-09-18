@@ -32,10 +32,6 @@ services:
   web:
     build:
       context: ./frontend
-      args:
-        - VITE_API_URL=${API_URL:-http://localhost:8000}
-    environment:
-      - VITE_API_URL=${API_URL:-http://localhost:8000}
     depends_on:
       - api
     ports:
