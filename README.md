@@ -7,6 +7,11 @@ A personal coffee brewing journal with passwordless authentication, multi-tenant
 - **Auth**: Magic link email → JWT in HttpOnly cookie (24h, session-revocable)
 - **Infrastructure**: Docker Compose (db + api + web) + Makefile helpers + GitHub Actions CI
 
+[![CI](https://github.com/thrasher2112/coffee_journal/actions/workflows/ci.yml/badge.svg)](https://github.com/thrasher2112/coffee_journal/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**Live demo**: <https://coffee-journal-uijs.onrender.com> (free tier — sleeps after ~15 min idle, takes ~50s to wake on first load)
+
 ---
 
 ## Quick Start
