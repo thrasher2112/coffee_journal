@@ -9,11 +9,8 @@ services:
   - type: web
     name: coffee-journal
     runtime: docker
-    # The branch Render tracks. Pinned explicitly because `main` does not yet
-    # carry this file or the root Dockerfile - without it a Blueprint looks at
-    # the repo default branch and finds nothing. Change to `main` once this is
-    # merged, or Render will keep deploying a stale feature branch.
-    branch: feat/mobile-pwa
+    # The branch Render tracks.
+    branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: free
