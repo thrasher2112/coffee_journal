@@ -30,6 +30,7 @@ frontend/.vite/
 backend/.env
 backend/.env.*
 !backend/.env.example
+!backend/.env.selfhost.example
 
 # Editor / OS
 .DS_Store

@@ -1,0 +1,90 @@
+# Self-hosted deployment option: the same single-container image described by
+# render.yaml, run under Docker Compose with a local Postgres, behind a
+# reverse proxy you provide (Caddy, nginx, Cloudflare Tunnel, Tailscale
+# Funnel -- anything that terminates HTTPS and sets X-Forwarded-For).
+#
+# This is an ALTERNATIVE to the Render + Neon deployment, not a successor to
+# it. See "Deploying" in README.md for both options and their trade-offs.
+#
+# Use ONLY with an explicit -f AND --env-file, never bare `docker compose up`:
+#   docker compose --env-file backend/.env.selfhost -f docker-compose.selfhost.yml up -d --build
+#
+# Every command below needs BOTH flags. -f alone is not enough: db's
+# POSTGRES_* values below come from ${...} interpolation, and compose only
+# interpolates from the shell environment or a file given via --env-file --
+# never from a service's env_file:. Omitting --env-file fails loudly (the
+# POSTGRES_PASSWORD guard below names the fix), so this is safe to get
+# wrong, just inconvenient -- but every documented invocation in README.md
+# and the plan carries it, and yours should too.
+#
+# Two reasons NOT to fold this into the default file set:
+# (a) omitting -f entirely gets you docker-compose.yml PLUS
+#     docker-compose.override.yml, which bind-mounts source over the image
+#     and replaces the command with a --reload dev server; and
+# (b) explicitly stacking both files (-f docker-compose.yml -f this one)
+#     still breaks, because compose MERGES ports lists rather than
+#     replacing them -- that would republish Postgres on 0.0.0.0:5555, and
+#     Docker's published ports bypass a host firewall.
+name: coffee-journal-selfhost
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # Deliberately NOT `env_file: [backend/.env.selfhost]` (unlike `app`
+    # below). That file also carries JWT_SECRET, RESEND_API_KEY, and
+    # ALLOWED_EMAILS -- the database container has no business being able
+    # to read the JWT signing secret or the email API key via `docker
+    # inspect` or /proc/1/environ. ${...} interpolation below, fed by
+    # `--env-file backend/.env.selfhost` on the command line, pulls only
+    # these three names out of that same file and injects nothing else --
+    # one file stays the single source of truth for the password without
+    # widening what's inside this container.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-coffee_journal}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Set it in backend/.env.selfhost AND pass --env-file backend/.env.selfhost on the compose command line -- env_file on a service does not feed this interpolation, only --env-file or a root .env does.}'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # No ports. The database is reachable only on the compose network.
+    healthcheck:
+      # Plain ${...}, not $$-escaped: with --env-file supplying real
+      # interpolation values, `config` bakes the operator's actual
+      # POSTGRES_USER in here directly, so what `config` prints is exactly
+      # what runs -- no reliance on the container also having the variable
+      # in its own environment at healthcheck time.
+      test: ['CMD-SHELL', 'pg_isready -U "${POSTGRES_USER:-postgres}"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    # The root Dockerfile -- the same single-origin image render.yaml builds.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - backend/.env.selfhost
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Loopback only: your reverse proxy reaches this, nothing else can.
+      # Binding 0.0.0.0 would let anything on the network reach the app
+      # directly, bypassing the proxy and with it the X-Forwarded-For chain
+      # that rate limiting depends on.
+      - '127.0.0.1:8080:8000'
+    healthcheck:
+      # The Render option gets this from render.yaml's healthCheckPath;
+      # compose has no equivalent, so it is spelled out here. Note /health
+      # returns 200 even when the database is degraded, so this proves the
+      # process is up, not that the app is fully healthy.
+      test: ['CMD-SHELL', 'python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(''http://127.0.0.1:8000/health'', timeout=3).status==200 else 1)"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
