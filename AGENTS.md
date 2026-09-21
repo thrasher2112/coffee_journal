@@ -196,9 +196,11 @@ container dies at startup with `env: 'bash
 
 ## Ops Notes
 
-- Postgres maps to host port `5555` (container `5432`) to avoid conflicts
+- Postgres maps to host port `5555` (container `5432`) to avoid conflicts — this is the
+  local dev stack (`docker-compose.yml`), not either deploy target below
 - The API container runs `alembic upgrade head` + seed on every boot (safe to re-run)
-- `docker compose down -v` drops the Postgres volume — data is lost
+- `docker compose down -v` drops the Postgres volume — data is lost. That's the dev stack's
+  volume; the self-hosted stack's volume needs the same `-f`/`--env-file` flags to target (see below)
 - `JWT_EXPIRY_HOURS=24` by default; the dev `.env.example` leaves it at 24
 - In production: set `DEBUG=false`, `JWT_SECRET` (32+ chars), `COOKIE_SECURE=true`, `COOKIE_DOMAIN`
 - Production is the **root `Dockerfile`**: one container, node builds the SPA into `/app/static`
@@ -206,3 +208,8 @@ container dies at startup with `env: 'bash
   `backend/`+`frontend/` Dockerfiles for local dev — do not conflate the two.
 - `start.sh` honours `$PORT` (managed hosts inject it) and passes `--proxy-headers`, without
   which the app cannot see the TLS terminator's original https scheme.
+- Two deploy targets, peers, see README's "Deploying": Render + Neon (`render.yaml`) and
+  self-hosted (`docker-compose.selfhost.yml`).
+- `docker-compose.selfhost.yml` is never bare `docker compose up` — always pass both
+  `-f docker-compose.selfhost.yml` and `--env-file backend/.env.selfhost`, or you get the
+  dev override (bind-mounted source, `--reload`) or a `POSTGRES_PASSWORD is unset` failure.

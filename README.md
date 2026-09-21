@@ -209,7 +209,22 @@ A full audit was completed covering 22 issues. Key hardening applied:
 
 ---
 
-## Deploying (and using it on a phone)
+## Deploying
+
+Both options run the same production image, built from the root `Dockerfile`:
+one container serving the API and the built SPA from a single origin. What
+differs is where that container runs and who operates it.
+
+| | Render + Neon | Self-hosted |
+|---|---|---|
+| Setup | Blueprint + two-step first deploy | Compose + HTTPS proxy setup |
+| Cost | Free tier | Your own hardware |
+| Cold start | ~50s after 15 min idle on the free tier | No idle suspension while the host stays running |
+| You operate | Nothing | Host, proxy, TLS, backups |
+| Database | Neon | Postgres container |
+| `TRUSTED_PROXY_HOPS` | 3 | Measure it — see below |
+
+### Option A: Render + Neon
 
 Production runs as **one container serving both the API and the built SPA** from
 a single origin (root `Dockerfile`). That is not just tidiness:
@@ -225,7 +240,7 @@ a single origin (root `Dockerfile`). That is not just tidiness:
 Local development is unaffected: `docker compose up` still builds the split
 backend/frontend images so vite HMR and `uvicorn --reload` keep working.
 
-### One-time setup
+#### One-time setup
 
 1. **Database** - create a free [Neon](https://neon.tech) Postgres and copy its
    connection string in verbatim; the app pins the psycopg3 driver itself, so
@@ -250,7 +265,7 @@ backend/frontend images so vite HMR and `uvicorn --reload` keep working.
 5. **Move your data across** - use Settings → Back up / Restore on the local
    instance, then restore the file on the deployed one.
 
-### Backups
+#### Backups
 
 Settings → Back up / Restore downloads everything the account holds - beans,
 brews and preferences - plus any brews still queued offline on that device.
@@ -263,11 +278,210 @@ The service worker still paints the app shell instantly and the offline queue
 accepts a brew regardless, so it mostly hides. If it stops being tolerable,
 Cloud Run or Fly.io cold-start in a few seconds instead.
 
-### Installing on a phone
+#### Installing on a phone
 
 Open the deployed URL and use "Add to Home Screen" (iOS) or "Install app"
 (Android). It then runs standalone, and brews logged with no signal are queued
 in `localStorage` and flushed automatically when the connection returns.
+
+### Option B: Self-hosted with Docker Compose
+
+The same image, run with `docker-compose.selfhost.yml` and a local Postgres
+container instead of Neon.
+
+#### One-time setup
+
+1. **Env file** - copy `backend/.env.selfhost.example` to
+   `backend/.env.selfhost` and fill it in: `POSTGRES_PASSWORD` (and the
+   matching password in `DATABASE_URL`), `JWT_SECRET`, `FRONTEND_URL`/
+   `API_URL` (your real hostname), `ALLOWED_EMAILS`, `RESEND_API_KEY`,
+   `RESEND_FROM`. **Leave `TRUSTED_PROXY_HOPS` at its shipped `0`** - that's
+   a deliberate bootstrap value, not a placeholder to fill in now. Measuring
+   the real value requires the app to already be running (see "Measuring
+   TRUSTED_PROXY_HOPS" below), so it can't be known before first boot -
+   shipping anything else there would make the app crash at startup instead.
+
+   Before your first `up` against a fresh volume, also run `env | grep
+   POSTGRES` and make sure nothing is already exported. Compose lets shell
+   environment variables win over `--env-file`, so a stray exported
+   `POSTGRES_PASSWORD` silently overrides the file's value for `db` while
+   `app` still gets the file's password - a mismatch that becomes permanent
+   Postgres state on that volume's first `initdb`, not something you can fix
+   by unsetting the variable afterwards.
+2. **Bring it up, and confirm it's actually healthy** - `up -d` exiting `0`
+   only means the containers were *created*, not that the app came up:
+
+   ```bash
+   docker compose --env-file backend/.env.selfhost -f docker-compose.selfhost.yml up -d --build
+   docker compose --env-file backend/.env.selfhost -f docker-compose.selfhost.yml ps
+   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/health
+   ```
+
+   Both flags on every one of those commands are mandatory, and each fails
+   differently if you drop it:
+
+   - `-f docker-compose.selfhost.yml` - without it, compose falls back to its
+     default file set, `docker-compose.yml` plus `docker-compose.override.yml`
+     (which auto-applies whenever present). That override bind-mounts source
+     over the built image and replaces the command with a `--reload` dev
+     server, so you'd silently get the dev stack instead of the production
+     image.
+   - `--env-file backend/.env.selfhost` - without it, the `db` service's
+     `POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` never resolve. A
+     service's own `env_file:` (which `app` uses) injects variables *into*
+     that container; it does not feed compose's own `${...}` interpolation,
+     which is what `db`'s `environment:` block relies on for those three
+     values. `config`, `ps`, and `logs` all refuse to run and name the
+     missing variable when you drop this flag - that's the common case, and
+     it fails loudly. The precedence hazard in step 1 above is the case
+     where it does *not* fail loudly: a stray shell variable satisfies the
+     interpolation with the wrong value instead of leaving it unset.
+
+   Expect `db` and `app` both `healthy` in `ps` (give `app` its 40s
+   `start_period` before assuming it's stuck) and `200` from the `curl`. If
+   not, `docker compose --env-file backend/.env.selfhost -f
+   docker-compose.selfhost.yml logs app` - the config guards raise at import
+   and name the offending variable.
+
+   Use the same two flags for every other `docker compose` command against
+   this file (`ps`, `logs`, `down`, ...).
+3. **Reverse proxy** - the app publishes on `127.0.0.1:8080` only; nothing
+   but the host itself can reach it directly. Put an HTTPS reverse proxy in
+   front of it that forwards to that port, sets `X-Forwarded-Proto: https`,
+   and - this is the part that matters for rate limiting - overwrites or
+   appends to `X-Forwarded-For` with the connection it actually sees, rather
+   than passing through whatever the client sent. A proxy that merely relays
+   a caller-supplied header makes rate-limit identity forgeable no matter
+   how correct the hop count below is, since neither this app nor uvicorn's
+   `--forwarded-allow-ips="*"` (enabled automatically once
+   `TRUSTED_PROXY_HOPS > 0`) authenticate where the header came from. Caddy,
+   nginx, Cloudflare Tunnel, and Tailscale Funnel all do this by default;
+   which one you pick and how you configure it is operator-specific and out
+   of scope for this README.
+
+   If your proxy itself runs in a container, its own `127.0.0.1` is not the
+   host's - it can't reach the app at `127.0.0.1:8080` the way a proxy
+   running directly on the host can. Point it at the host's real address
+   instead (a shared Docker network, `host.docker.internal`, or similar,
+   depending on your setup).
+4. **Measure and set `TRUSTED_PROXY_HOPS`** - see "Measuring
+   TRUSTED_PROXY_HOPS" below. Rate limiting stays degraded, in a way that
+   fails silently, until this step is done - don't treat step 3 as finished
+   without it.
+
+#### Backups
+
+You own backups on this option - there's no managed database behind it.
+`docker compose --env-file backend/.env.selfhost -f docker-compose.selfhost.yml down`
+stops the containers and leaves the `postgres_data` volume intact; adding
+`-v` to that command destroys it, journal and all. Settings → Back up in the
+app is the manual export, and it's worth doing on a schedule regardless of the
+volume, since it's the only copy that lives outside this host.
+
+#### After a redeploy
+
+The service worker is network-first for navigations, not cache-first -
+reloading or navigating fetches the current `index.html` over the network,
+and its hashed asset URLs pull the current JS/CSS bundles with it, so a
+plain reload already picks up a fresh deploy. A tab that's open and never
+reloaded just keeps running whatever it already loaded, same as any
+single-page app. Cache-first only applies to the hashed assets themselves,
+and exists so a fetched bundle loads instantly on repeat visits and so
+navigation still resolves to something if the network fetch fails (e.g.
+offline).
+
+### Measuring TRUSTED_PROXY_HOPS
+
+`TRUSTED_PROXY_HOPS` is a property of whatever reverse proxy chain sits in
+front of the app, not of Render vs self-hosted, so this applies to either
+option - though only the self-hosted option needs to *bootstrap* it, since
+it ships at `0` and has to reach a running, proxied instance before it can
+be measured at all (see Option B's "One-time setup" above for that
+ordering).
+
+Known values are configuration-dependent examples, not guarantees - always
+measure your own chain: Render measured `3` for its own chain (Cloudflare,
+then Render's own internal load balancer - see the comment in `config.py`).
+A single local Caddy or nginx is typically `1`. A Cloudflare Tunnel is
+typically `1` or `2`, depending on whether the daemon appends its own
+address.
+
+Getting it wrong fails **silently in both directions**. Too low can either
+read a hop whose value changes on every request - so every request looks
+like a new client and rate limiting, including on magic-link requests,
+quietly stops working - or fall through to an address that's stable but
+shared by every visitor (the proxy's own address, or the raw TCP peer at the
+bootstrap value `0`), collapsing everyone into one bucket instead. Too high
+lets a caller forge `X-Forwarded-For` and pick their own bucket.
+
+**Measure it (with the stack up and the proxy already in front - see Option
+B steps 2-3, or the equivalent for wherever you're running this):**
+
+1. Add a temporary probe route in `backend/src/coffee_journal/main.py`, right
+   after `app.include_router(api_router)`. **Do not commit this** - it's a
+   throwaway diagnostic, not application code:
+
+   ```python
+   @app.get("/debug/xff", tags=["debug"])
+   def _debug_xff(request: Request):
+       from .rate_limit import _get_real_ip
+
+       return {
+           "x_forwarded_for": request.headers.get("x-forwarded-for"),
+           "client": request.client.host if request.client else None,
+           "computed_key": _get_real_ip(request),
+           "trusted_proxy_hops": settings.trusted_proxy_hops,
+       }
+   ```
+
+2. Rebuild and hit it **from outside, through the proxy** - not from the host
+   itself, or you'll never see the header at all:
+
+   ```bash
+   curl -s https://your-hostname/debug/xff
+   ```
+
+   Read `x_forwarded_for` (the raw header), not `computed_key`, if
+   `TRUSTED_PROXY_HOPS` is still `0` at this point - at `0` the app never
+   looks at `X-Forwarded-For`, so `computed_key` is just the raw TCP peer
+   regardless of what the header says.
+3. `x_forwarded_for` is a comma-separated list; the number of entries is the
+   hop count.
+4. Repeat the request a few times. The entry count, and the specific entry
+   that many places from the right, must be identical every time - a value
+   that changes between requests means you're reading a hop that churns, and
+   the count isn't trustworthy yet.
+5. Set `TRUSTED_PROXY_HOPS` to that number (`backend/.env.selfhost` for the
+   self-hosted option, the Render dashboard for the other) and recreate the
+   app container:
+
+   ```bash
+   docker compose --env-file backend/.env.selfhost -f docker-compose.selfhost.yml up -d
+   ```
+
+6. **Now** verify `computed_key` - this check is only meaningful once step 5
+   is done:
+
+   ```bash
+   curl -s https://your-hostname/debug/xff
+   ```
+
+   `computed_key` must equal your real public IP and stay identical across
+   repeats.
+7. Verify the proxy actually blocks a forged header - a correct count alone
+   isn't enough if the proxy passes a caller-supplied header through
+   unchanged. Try both a single bogus entry and a multi-entry prefix:
+
+   ```bash
+   curl -s -H 'X-Forwarded-For: 203.0.113.99' https://your-hostname/debug/xff
+   curl -s -H 'X-Forwarded-For: 203.0.113.99, 203.0.113.98' https://your-hostname/debug/xff
+   ```
+
+   Both must still report your real IP as `computed_key`, never the forged
+   one. If either changes it, the proxy is passing the header through
+   instead of overwriting/appending to it - fix the proxy, not this app.
+8. Remove the probe route, rebuild, and confirm `git diff --stat` shows no
+   change to `main.py`.
 
 ## Production Checklist
 
