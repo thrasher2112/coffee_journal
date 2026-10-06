@@ -145,7 +145,8 @@ bare `postgresql://` or `postgres://` to `postgresql+psycopg://`. Every managed 
 psycopg2 - which is not installed, so an unedited paste used to kill the app at boot with a
 `ModuleNotFoundError` naming nothing relevant. An explicit driver is left untouched.
 
-**Shell scripts must stay LF.** `.gitattributes` forces `eol=lf` on `*.sh` and `Dockerfile`.
+**Shell scripts must stay LF.** `.gitattributes` forces `eol=lf` on every text file
+(`* text=auto eol=lf`), overriding any machine's `core.autocrlf`, and names `*.sh` and `Dockerfile` explicitly.
 Without it a Windows checkout (`core.autocrlf=true`) rewrites `start.sh` with CRLF and the
 container dies at startup with `env: 'bash
 ': No such file or directory`.

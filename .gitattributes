@@ -1,6 +1,13 @@
-# Shell scripts and Dockerfiles run inside Linux containers. Without this, a
-# Windows checkout (core.autocrlf=true) rewrites them with CRLF and the image
-# fails at startup with `env: 'bash\r': No such file or directory`.
+# Everything this repo ships runs on Linux (containers, CI, WSL), so every text
+# file is LF in the working tree regardless of each machine's core.autocrlf.
+# Without this, autocrlf=true writes CRLF into the checkout -- and the same
+# /mnt/c tree is shared by Windows git and WSL git, so two machines' settings
+# would fight over it. Recipes in the Makefile and values copied from
+# .env.example would carry a stray \r.
+* text=auto eol=lf
+
+# Called out explicitly because these are the ones that fail loudly: a CRLF
+# start.sh kills the container with `env: 'bash\r': No such file or directory`.
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf
@@ -9,5 +16,8 @@ entrypoint* text eol=lf
 # Keep binary assets byte-exact.
 *.png binary
 *.ico binary
+*.jpg binary
+*.jpeg binary
 *.woff binary
 *.woff2 binary
+*.ods binary

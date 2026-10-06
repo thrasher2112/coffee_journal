@@ -303,8 +303,8 @@ or the "first device seeds, doesn't overwrite" guarantee silently breaks.
   accidental gate, so `ALLOWED_EMAILS` must be confirmed set *before* domain
   verification, or the app becomes open registration
   [STATED: HANDOFF.txt "Operational notes"].
-- **`.gitattributes` forces `eol=lf` on `*.sh` and `Dockerfile`**: a
-  Windows checkout without it rewrites `start.sh` with CRLF and the container
+- **`.gitattributes` forces `eol=lf` on every text file** (originally just
+  `*.sh` and `Dockerfile`): a Windows checkout without it rewrites `start.sh` with CRLF and the container
   dies at boot with a shell-parsing error naming nothing relevant
   [STATED: AGENTS.md]. This matters concretely for this repo's own
   contributor — the working directory path (`C:\Users\bdrob\...`) confirms

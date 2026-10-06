@@ -271,9 +271,9 @@ changes per AGENTS.md's "wire it through" checklist).
   rows — SQLite in the test suite doesn't enforce them. Assert via 404
   responses on the dependent resource instead (per AGENTS.md, followed in
   `backend/tests/test_brews.py`/`test_beans.py`).
-- **Shell script line endings**: `.gitattributes` forces `eol=lf` on `*.sh`
-  and `Dockerfile` — a Windows checkout without it breaks `start.sh` at
-  container boot. Don't add a new `.sh` file without checking it's covered.
+- **Line endings**: `.gitattributes` forces `eol=lf` on every text file
+  (`* text=auto eol=lf`), overriding each machine's `core.autocrlf` — a CRLF
+  checkout breaks `start.sh` at container boot and the `Makefile` recipes.
 
 ## Open questions
 - Frontend test count (32) is still unverified — no Node/vitest run this
