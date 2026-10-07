@@ -1,3 +1,12 @@
+interface PresetDefinition {
+  label: string;
+  ratios: readonly number[];
+  // Whether the full form pre-fills bloom time and total brew time for this
+  // style. Defaults to true; false means both stay unset until the user
+  // enters them.
+  timedDefaults?: boolean;
+}
+
 // The keys here must match SETUP_BREW_STYLES in
 // backend/src/coffee_journal/brew_styles.py (pinned by brewStyles.test.ts).
 export const BREW_STYLE_PRESETS = {
@@ -16,11 +25,19 @@ export const BREW_STYLE_PRESETS = {
   espresso: {
     label: 'Espresso',
     ratios: [2, 2.5, 3], // 1:2 is the classic; modern/lighter roasts run 1:2.5-1:3
+    // No bloom, and a 3-minute total time would be silently saved for a ~30 s shot.
+    timedDefaults: false,
   },
-} as const;
+} as const satisfies Record<string, PresetDefinition>;
 
 export type BrewStyle = keyof typeof BREW_STYLE_PRESETS;
-export type BrewStylePreset = (typeof BREW_STYLE_PRESETS)[BrewStyle];
+
+// What the accessor returns: every preset with its optional metadata resolved.
+export interface BrewStylePreset {
+  label: string;
+  ratios: readonly number[];
+  timedDefaults: boolean;
+}
 
 // Own-key check: `value in PRESETS` is also true for prototype keys such as
 // "toString" or "constructor".
@@ -30,7 +47,9 @@ export function isBrewStyle(value: string | undefined | null): value is BrewStyl
 
 // Safe lookup: stored brews/drafts can carry a style outside the presets.
 export function getBrewStylePreset(style: string | undefined | null): BrewStylePreset | undefined {
-  return isBrewStyle(style) ? BREW_STYLE_PRESETS[style] : undefined;
+  if (!isBrewStyle(style)) return undefined;
+  const preset: PresetDefinition = BREW_STYLE_PRESETS[style];
+  return { label: preset.label, ratios: preset.ratios, timedDefaults: preset.timedDefaults !== false };
 }
 
 // Brews from before brew_style existed, or an import from elsewhere, can

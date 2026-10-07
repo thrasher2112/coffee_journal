@@ -34,6 +34,13 @@ describe('isBrewStyle / getBrewStylePreset', () => {
     expect(getBrewStylePreset(undefined)).toBeUndefined();
   });
 
+  it('only espresso opts out of timed (bloom / total-time) defaults', () => {
+    expect(getBrewStylePreset('espresso')?.timedDefaults).toBe(false);
+    for (const style of ['pour-over', 'aeropress', 'french-press']) {
+      expect(getBrewStylePreset(style)?.timedDefaults).toBe(true);
+    }
+  });
+
   it('brewStyleLabel shows unknown values as-is', () => {
     expect(brewStyleLabel('toString')).toBe('toString');
     expect(brewStyleLabel('cold-brew')).toBe('cold-brew');

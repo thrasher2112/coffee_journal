@@ -10,14 +10,13 @@ import type { TemperatureUnit } from '../contexts/PreferencesContext';
 import { BREW_STYLE_PRESETS, getBrewStylePreset, isBrewStyle } from '../lib/brewStyles';
 import {
   DEFAULT_STYLE,
+  agitationTotalsFromEvents,
   applyStyle,
   makeDraft,
   roundYield,
   withAdvancedDefaults,
   type DraftForm,
 } from '../lib/brewDraft';
-
-export type { DraftForm };
 
 interface Props {
   beans: Bean[];
@@ -56,7 +55,11 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
       const draft = { ...initialDraft, brew_style: initialDraft.brew_style || DEFAULT_STYLE };
       return variant === 'full' ? withAdvancedDefaults(draft) : draft;
     }
-    return makeDraft(defaultBeanId, DEFAULT_STYLE, preferences.preferredGrinder, { advanced: variant === 'full' });
+    return makeDraft({
+      beanId: defaultBeanId,
+      grinder: preferences.preferredGrinder,
+      advanced: variant === 'full',
+    });
   });
   const [waterTempInput, setWaterTempInput] = useState<string>(() =>
     toDisplayTemp(form.water_temp_c, preferences.temperatureUnit)
@@ -107,11 +110,16 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   };
 
   // A fresh draft (Reset, or after a save) for the style currently selected.
-  const startFreshDraft = (beanId: string | undefined) => {
+  const startFreshDraft = (beanId: string | undefined, style: string | undefined) => {
     grinderDecided.current = false;
     setAgitationTotals([]);
     setForm(
-      makeDraft(beanId, form.brew_style || DEFAULT_STYLE, preferences.preferredGrinder, { advanced: isAdvanced })
+      makeDraft({
+        beanId,
+        style: style || DEFAULT_STYLE,
+        grinder: preferences.preferredGrinder,
+        advanced: isAdvanced,
+      })
     );
   };
 
@@ -167,7 +175,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   // difference against the previous row's total, kept in its own array
   // rather than reverse-engineered from amount_g each time so an edit to an
   // earlier row's total doesn't need any special-casing to ripple forward.
-  const [agitationTotals, setAgitationTotals] = useState<Array<number | ''>>([]);
+  const [agitationTotals, setAgitationTotals] = useState<Array<number | ''>>(() =>
+    agitationTotalsFromEvents(initialDraft?.agitation_events ?? [])
+  );
 
   const deriveAgitationAmounts = (totals: Array<number | ''>): Array<number | undefined> => {
     let runningTotal = 0;
@@ -219,6 +229,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
       alert('Enter dose and yield before saving.');
       return;
     }
+    // Captured before awaiting: the fresh draft that follows a save is built
+    // from what was submitted, not from whatever the form holds by then.
+    const savedBeanId = form.bean_id;
+    const savedStyle = form.brew_style;
     setSaving(true);
     try {
       const payload: BrewDraft = {
@@ -230,7 +244,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
         total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s
       };
       await onSave(payload);
-      startFreshDraft(form.bean_id);
+      startFreshDraft(savedBeanId, savedStyle);
     } finally {
       setSaving(false);
     }
@@ -242,7 +256,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   const handleWaterTempChange = (rawValue: string) => {
     setWaterTempInput(rawValue);
     if (rawValue === '') {
-      update('water_temp_c', undefined);
+      // '' (blanked on purpose), not undefined (unset): only unset gets the
+      // 96 C default back from withAdvancedDefaults.
+      update('water_temp_c', '');
       return;
     }
     const parsed = Number(rawValue);
@@ -277,7 +293,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
                 onChange={(event) => handleStyleChange(event.target.value)}
                 className="min-h-11 min-w-[170px] rounded-full border border-caramel/40 bg-espresso/60 px-3 py-1 text-crema text-sm normal-case"
               >
-                {!isBrewStyle(brewStyle) && <option value={brewStyle}>{brewStyle}</option>}
+                {!isBrewStyle(brewStyle) && <option value={brewStyle}>{`${brewStyle} (custom)`}</option>}
                 {Object.entries(BREW_STYLE_PRESETS).map(([value, meta]) => (
                   <option key={value} value={value}>
                     {meta.label}
@@ -310,7 +326,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
           <button
             type="button"
             className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
-            onClick={() => startFreshDraft(defaultBeanId)}
+            onClick={() => startFreshDraft(defaultBeanId, form.brew_style)}
           >
             Reset
           </button>

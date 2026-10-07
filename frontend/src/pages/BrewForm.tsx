@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { QuickLogBar, type DraftForm } from '../components/QuickLogBar';
+import { QuickLogBar } from '../components/QuickLogBar';
+import type { DraftForm } from '../lib/brewDraft';
 import type { Bean } from '../types';
 import { createBrew, fetchBeans } from '../lib/api';
 

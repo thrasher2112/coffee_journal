@@ -1,7 +1,8 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
-import { QuickLogBar, type DraftForm } from '../QuickLogBar';
+import { QuickLogBar } from '../QuickLogBar';
+import type { DraftForm } from '../../lib/brewDraft';
 import type { Bean, BrewDraft } from '../../types';
 
 const mockPrefs = vi.hoisted(() => ({
@@ -66,6 +67,14 @@ const baseDraft: DraftForm = {
   rating: 8,
 };
 
+// Click save and wait for the async save to settle (the button re-enables once
+// onSave has resolved and the next draft has been set), so the trailing state
+// updates happen inside RTL's act-aware waitFor rather than after the test.
+async function clickSave(label: string) {
+  fireEvent.click(screen.getByText(label));
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Save/ })).not.toBeDisabled());
+}
+
 const styleSelect = () => screen.getByLabelText('Style') as HTMLSelectElement;
 const doseInput = () => screen.getByLabelText('Dose (g)') as HTMLInputElement;
 const yieldInput = () => screen.getByLabelText('Yield (g)') as HTMLInputElement;
@@ -113,7 +122,7 @@ describe('QuickLogBar variants', () => {
     fireEvent.change(screen.getByLabelText('Notes'), {
       target: { value: 'Tastes like blueberries' },
     });
-    fireEvent.click(screen.getByText('Save brew'));
+    await clickSave('Save brew');
 
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ tasting_notes: 'Tastes like blueberries' })
@@ -179,7 +188,7 @@ describe('QuickLogBar style transitions', () => {
     expect(yieldInput().value).toBe('270');
   });
 
-  it('a 1:2.5 chip on an 18.5 g dose gives 46.3 g, which is valid and saves', () => {
+  it('a 1:2.5 chip on an 18.5 g dose gives 46.3 g, which is valid and saves', async () => {
     const onSave = vi.fn();
     renderForm('quick', onSave);
     fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
@@ -188,13 +197,13 @@ describe('QuickLogBar style transitions', () => {
     expect(yieldInput().value).toBe('46.3');
     expect(yieldInput().checkValidity()).toBe(true);
     expect(doseInput().checkValidity()).toBe(true);
-    fireEvent.click(screen.getByText('Save quick brew'));
+    await clickSave('Save quick brew');
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ bean_weight_g: 18.5, water_weight_g: 46.3, brew_style: 'espresso' })
     );
   });
 
-  it('accepts a 45 g espresso yield (15 g x 3)', () => {
+  it('accepts a 45 g espresso yield (15 g x 3)', async () => {
     const onSave = vi.fn();
     renderForm('quick', onSave);
     fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
@@ -202,7 +211,7 @@ describe('QuickLogBar style transitions', () => {
     fireEvent.click(screen.getByText('1:3'));
     expect(yieldInput().value).toBe('45');
     expect(yieldInput().checkValidity()).toBe(true);
-    fireEvent.click(screen.getByText('Save quick brew'));
+    await clickSave('Save quick brew');
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ water_weight_g: 45 }));
   });
 
@@ -231,7 +240,7 @@ describe('QuickLogBar advanced defaults', () => {
     expect((screen.getByLabelText(/Water temp/) as HTMLInputElement).value).toBe('96');
   });
 
-  it('espresso initialDraft in the full form gets no bloom and no total-time default', () => {
+  it('espresso initialDraft in the full form gets no bloom and no total-time default', async () => {
     const onSave = vi.fn();
     renderForm('full', onSave, { ...baseDraft, brew_style: 'espresso', bean_weight_g: 18, water_weight_g: 54 });
     expect(bloomMinutes().value).toBe('');
@@ -241,7 +250,7 @@ describe('QuickLogBar advanced defaults', () => {
     // water temp default is unchanged
     expect((screen.getByLabelText(/Water temp/) as HTMLInputElement).value).toBe('96');
 
-    fireEvent.click(screen.getByText('Save brew'));
+    await clickSave('Save brew');
     const saved = onSave.mock.calls[0][0] as BrewDraft;
     expect(saved.bloom_time_s).toBeUndefined();
     expect(saved.total_brew_time_s).toBeUndefined();
@@ -286,7 +295,7 @@ describe('QuickLogBar advanced defaults', () => {
 });
 
 describe('QuickLogBar switching to espresso in the full form', () => {
-  it('drops the untouched pour-over bloom/total defaults, and saves without them', () => {
+  it('drops the untouched pour-over bloom/total defaults, and saves without them', async () => {
     const onSave = vi.fn();
     renderForm('full', onSave);
     expect(bloomSeconds().value).toBe('45');
@@ -295,7 +304,7 @@ describe('QuickLogBar switching to espresso in the full form', () => {
     expect(bloomSeconds().value).toBe('');
     expect(totalMinutes().value).toBe('');
     expect(totalSeconds().value).toBe('');
-    fireEvent.click(screen.getByText('Save brew'));
+    await clickSave('Save brew');
     const saved = onSave.mock.calls[0][0] as BrewDraft;
     expect(saved.brew_style).toBe('espresso');
     expect(saved.bloom_time_s).toBeUndefined();
@@ -336,18 +345,19 @@ describe('QuickLogBar initialDraft', () => {
 });
 
 describe('QuickLogBar unknown brew_style', () => {
-  it.each(['cold-brew', 'toString'])('renders %s without crashing and keeps it selectable', (raw) => {
+  it.each(['cold-brew', 'toString'])('renders %s without crashing and keeps it selectable', async (raw) => {
     const onSave = vi.fn();
     renderForm('quick', onSave, { ...baseDraft, brew_style: raw });
     expect(styleSelect().value).toBe(raw);
     expect(Array.from(styleSelect().options).map((o) => o.value)).toContain(raw);
+    expect(screen.getByRole('option', { name: `${raw} (custom)` })).toBeInTheDocument();
     // no ratio chips for a style without a preset
     expect(screen.queryByText(/^1:\d/)).not.toBeInTheDocument();
     // yield from the draft is untouched
     expect(yieldInput().value).toBe('288');
 
     // saving does not silently change it
-    fireEvent.click(screen.getByText('Save quick brew'));
+    await clickSave('Save quick brew');
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ brew_style: raw }));
   });
 
@@ -434,13 +444,13 @@ describe('QuickLogBar Reset and save', () => {
     expect(totalSeconds().value).toBe('');
   });
 
-  it('Reset in the full pour-over form keeps the advanced defaults visible and in the draft', () => {
+  it('Reset in the full pour-over form keeps the advanced defaults visible and in the draft', async () => {
     const onSave = vi.fn();
     renderForm('full', onSave);
     fireEvent.change(bloomSeconds(), { target: { value: '30' } });
     fireEvent.click(screen.getByText('Reset'));
     expect(bloomSeconds().value).toBe('45');
-    fireEvent.click(screen.getByText('Save brew'));
+    await clickSave('Save brew');
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ bloom_time_s: 45, total_brew_time_s: 180 }));
   });
 
@@ -449,7 +459,7 @@ describe('QuickLogBar Reset and save', () => {
     renderForm('quick', onSave);
     fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
     fireEvent.change(doseInput(), { target: { value: '15' } });
-    fireEvent.click(screen.getByText('Save quick brew'));
+    await clickSave('Save quick brew');
     await vi.waitFor(() => expect(doseInput().value).toBe('18'));
     expect(styleSelect().value).toBe('espresso');
     expect(yieldInput().value).toBe('36');
@@ -457,7 +467,7 @@ describe('QuickLogBar Reset and save', () => {
 });
 
 describe('QuickLogBar water temperature field', () => {
-  it('shows the default in Fahrenheit and does not fight typing', () => {
+  it('shows the default in Fahrenheit and does not fight typing', async () => {
     mockPrefs.temperatureUnit = 'fahrenheit';
     const onSave = vi.fn();
     renderForm('full', onSave);
@@ -467,7 +477,7 @@ describe('QuickLogBar water temperature field', () => {
     expect(temp.value).toBe('2');
     fireEvent.change(temp, { target: { value: '200' } });
     expect(temp.value).toBe('200');
-    fireEvent.click(screen.getByText('Save brew'));
+    await clickSave('Save brew');
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ water_temp_c: 93 }));
   });
 
@@ -477,5 +487,77 @@ describe('QuickLogBar water temperature field', () => {
     fireEvent.change(temp, { target: { value: '90' } });
     fireEvent.click(screen.getByText('Reset'));
     expect(temp.value).toBe('96');
+  });
+});
+
+describe('QuickLogBar blanked water temperature', () => {
+  it('stays blank through a style pick and saves without a temperature', async () => {
+    const onSave = vi.fn();
+    renderForm('full', onSave);
+    const temp = screen.getByLabelText(/Water temp/) as HTMLInputElement;
+    expect(temp.value).toBe('96');
+    fireEvent.change(temp, { target: { value: '' } });
+    fireEvent.change(styleSelect(), { target: { value: 'aeropress' } });
+    expect(temp.value).toBe('');
+    await clickSave('Save brew');
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as BrewDraft;
+    expect(saved.brew_style).toBe('aeropress');
+    expect(saved.water_temp_c).toBeUndefined();
+  });
+
+  it('stays blank when advanced mode is toggled off and on', () => {
+    renderForm('full');
+    const temp = () => screen.getByLabelText(/Water temp/) as HTMLInputElement;
+    fireEvent.change(temp(), { target: { value: '' } });
+    fireEvent.click(screen.getByLabelText('Advanced mode'));
+    fireEvent.click(screen.getByLabelText('Advanced mode'));
+    expect(temp().value).toBe('');
+  });
+
+  it('rewrites the buffer in the new unit when the unit switches at runtime', () => {
+    const { rerenderForm } = renderForm('full');
+    const temp = screen.getByLabelText(/Water temp/) as HTMLInputElement;
+    expect(temp.value).toBe('96');
+    mockPrefs.temperatureUnit = 'fahrenheit';
+    rerenderForm();
+    expect(temp.value).toBe('205');
+    mockPrefs.temperatureUnit = 'celsius';
+    rerenderForm();
+    expect(temp.value).toBe('96');
+  });
+});
+
+describe('QuickLogBar agitation rows', () => {
+  const agitationDraft: DraftForm = {
+    ...baseDraft,
+    agitation_events: [
+      { timestamp_s: 10, action: 'pour', amount_g: 50 },
+      { timestamp_s: 40, action: 'pour', amount_g: 100 },
+      { timestamp_s: 70, action: 'stir', amount_g: undefined },
+    ],
+  };
+  const totals = () =>
+    (screen.getAllByLabelText('Total poured so far in grams') as HTMLInputElement[]).map((i) => i.value);
+
+  it('seeds the scale readings from an incoming draft as running totals', () => {
+    renderForm('full', vi.fn(), agitationDraft);
+    expect(totals()).toEqual(['50', '150', '']);
+  });
+
+  it('editing an incoming draft\'s row recomputes later amounts instead of wiping them', () => {
+    renderForm('full', vi.fn(), agitationDraft);
+    fireEvent.change(screen.getAllByLabelText('Total poured so far in grams')[0], { target: { value: '60' } });
+    expect(screen.getByText('+60g this event')).toBeInTheDocument();
+    expect(screen.getByText('+90g this event')).toBeInTheDocument();
+  });
+
+  it('Reset clears the agitation rows and their readings', () => {
+    renderForm('full', vi.fn(), agitationDraft);
+    expect(totals()).toHaveLength(3);
+    fireEvent.click(screen.getByText('Reset'));
+    expect(screen.getByText('No agitation logged yet.')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('+ Add event'));
+    expect(totals()).toEqual(['']);
   });
 });

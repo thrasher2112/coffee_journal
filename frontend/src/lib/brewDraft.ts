@@ -6,6 +6,15 @@ import { getBrewStylePreset } from './brewStyles';
 // brew_style or yield changes in an effect, so a programmatic change (a saved
 // setup applying style + dose + yield together) is never clobbered by a
 // style-driven default.
+//
+// Whole-draft replacement and agitation: the component keeps the agitation
+// scale readings (`agitationTotals`) in its own state next to the draft, since
+// each row's amount_g is derived from them. Anything that replaces the draft
+// wholesale must keep agitation_events and those totals in sync - either
+// leave the current agitation_events untouched (what applySetup should do: a
+// setup has no agitation data) or reseed the totals with
+// agitationTotalsFromEvents, as the component does for an incoming draft and
+// clears them on Reset.
 
 // Omit the numeric fields that allow a blank ('') input state before
 // re-adding them below — intersecting BrewDraft's plain `number` types
@@ -37,18 +46,40 @@ export const roundYield = (grams: number): number => Number(grams.toFixed(1));
 const defaultRatio = (style: string | undefined): number =>
   (getBrewStylePreset(style) ?? getBrewStylePreset(DEFAULT_STYLE)!).ratios[0];
 
-// Espresso has no bloom, and a 3-minute total time would be silently saved
-// for a 30-second shot, so neither is defaulted for it.
-const hasTimedDefaults = (style: string | undefined): boolean => style !== 'espresso';
+// Whether a style gets bloom/total-time defaults (preset metadata; espresso
+// opts out). A style outside the presets keeps the defaults.
+const hasTimedDefaults = (style: string | undefined): boolean =>
+  getBrewStylePreset(style)?.timedDefaults ?? true;
+
+// Scale readings for an incoming draft's agitation rows: the running sum of
+// amount_g, blank where a row has no amount (matching how the component
+// derives amounts from readings, where a blank reading is skipped).
+export function agitationTotalsFromEvents(events: DraftForm['agitation_events']): Array<number | ''> {
+  let running = 0;
+  return events.map((event) => {
+    if (typeof event.amount_g !== 'number') return '';
+    running += event.amount_g;
+    return running;
+  });
+}
 
 // A fresh draft. With `advanced`, the style-aware advanced defaults are
 // applied too (the full form shows those fields from the start).
+//
+// Contract for the next bead's applySetup(draft, setup): it is a pure
+// `(draft) => draft` passed to setForm. It must set `brew_style` DIRECTLY, not
+// through applyStyle (applyStyle would reset the yield to ratios[0] and clear
+// bloom/total), then set dose, yield (dose x ratio via roundYield),
+// grinder_name, grind_setting, total_brew_time_s, machine_profile and
+// setup_name - replacing them even when the setup leaves them null - and call
+// withAdvancedDefaults LAST so unset advanced fields get the style's defaults.
+// It leaves agitation_events alone. The component's handler must also set
+// `grinderDecided.current = true`, even when the setup has no grinder, so
+// preference hydration does not refill a grinder the setup left empty.
 export function makeDraft(
-  beanId?: string,
-  style: string = DEFAULT_STYLE,
-  grinder?: string,
-  options: { advanced?: boolean } = {}
+  options: { beanId?: string; style?: string; grinder?: string; advanced?: boolean } = {}
 ): DraftForm {
+  const { beanId, style = DEFAULT_STYLE, grinder, advanced } = options;
   const draft: DraftForm = {
     bean_id: beanId,
     bean_weight_g: DEFAULT_BEAN_WEIGHT_G,
@@ -65,7 +96,7 @@ export function makeDraft(
     grinder_name: grinder,
     grind_setting: '',
   };
-  return options.advanced ? withAdvancedDefaults(draft) : draft;
+  return advanced ? withAdvancedDefaults(draft) : draft;
 }
 
 // Fills only the advanced fields that are still unset (undefined). A value
@@ -83,7 +114,9 @@ export function withAdvancedDefaults(draft: DraftForm): DraftForm {
 // Picking a style by hand: set it, reset the yield to dose x that style's
 // first ratio (only when the dose is a number and the style has a preset),
 // clear untouched bloom/total defaults when moving to espresso, and - in
-// advanced mode - fill the style's unset advanced defaults.
+// advanced mode - fill the style's unset advanced defaults. This is for a
+// style picked by hand; applying a saved setup must not go through it (see the
+// applySetup contract on makeDraft).
 export function applyStyle(draft: DraftForm, style: string, options: { advanced?: boolean } = {}): DraftForm {
   const preset = getBrewStylePreset(style);
   const next: DraftForm = { ...draft, brew_style: style };

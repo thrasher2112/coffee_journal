@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { BrewFormPage } from '../BrewForm';
-import type { DraftForm } from '../../components/QuickLogBar';
+import type { DraftForm } from '../../lib/brewDraft';
 
 vi.mock('../../lib/api', () => ({
   fetchBeans: vi.fn().mockResolvedValue([{ id: 'bean-1', name: 'Ethiopia', created_at: '', updated_at: '' }]),
@@ -30,21 +30,23 @@ const carriedDraft: DraftForm = {
 };
 
 describe('BrewFormPage', () => {
-  it('never mentions "quick" anywhere on the page', () => {
+  it('never mentions "quick" anywhere on the page', async () => {
     render(
       <MemoryRouter initialEntries={['/brew']}>
         <BrewFormPage />
       </MemoryRouter>
     );
+    await screen.findByRole('option', { name: /Ethiopia/ }); // let the beans load
     expect(screen.queryByText(/quick/i)).not.toBeInTheDocument();
   });
 
-  it('starts with advanced fields already visible', () => {
+  it('starts with advanced fields already visible', async () => {
     render(
       <MemoryRouter initialEntries={['/brew']}>
         <BrewFormPage />
       </MemoryRouter>
     );
+    await screen.findByRole('option', { name: /Ethiopia/ }); // let the beans load
     expect(screen.getByText('Bloom time')).toBeInTheDocument();
   });
 
