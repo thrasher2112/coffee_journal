@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { SetupsSection } from '../SetupsSection';
+import { SetupsSection, buildInput } from '../SetupsSection';
 
 const api = vi.hoisted(() => ({
   fetchSetups: vi.fn(),
@@ -11,7 +11,15 @@ const api = vi.hoisted(() => ({
 
 vi.mock('../../lib/api', () => ({
   ...api,
-  NetworkError: class NetworkError extends Error {}
+  NetworkError: class NetworkError extends Error {},
+  AuthError: class AuthError extends Error {},
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number) {
+      super(`Request failed: ${status}`);
+      this.status = status;
+    }
+  }
 }));
 
 vi.mock('../../contexts/PreferencesContext', () => ({
@@ -24,7 +32,7 @@ vi.mock('../../contexts/PreferencesContext', () => ({
   })
 }));
 
-import { NetworkError } from '../../lib/api';
+import { ApiError, AuthError, NetworkError } from '../../lib/api';
 
 const OFFICE = {
   id: 's1',
@@ -54,22 +62,25 @@ const MINIMAL = {
   updated_at: '2026-10-07T00:00:00Z'
 };
 
-const apiError = (status: number) =>
-  Object.assign(new Error(`Request failed: ${status}`), { status });
+const apiError = (status: number) => new ApiError(status);
 
 async function renderLoaded(setups: unknown[] = [OFFICE, MINIMAL]) {
   api.fetchSetups.mockResolvedValue(setups);
   render(<SetupsSection />);
-  await waitFor(() => expect(api.fetchSetups).toHaveBeenCalled());
+  // Wait for the load to settle: rows, or the empty state.
   if (setups.length) await screen.findAllByRole('listitem');
+  else await screen.findByText(/no setups yet/i);
 }
+
+const OFFLINE = 'Setups can only be changed while online';
 
 const type = (label: string | RegExp, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe('SetupsSection', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset implementations too, so one test's mockResolvedValue cannot leak into the next.
+    Object.values(api).forEach((fn) => fn.mockReset());
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -98,7 +109,7 @@ describe('SetupsSection', () => {
 
   it('shows an empty state when there are no setups', async () => {
     await renderLoaded([]);
-    expect(await screen.findByText(/no setups yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no setups yet/i)).toBeInTheDocument();
   });
 
   it('creates a setup, accepting a decimal ratio and sending blank optionals as null', async () => {
@@ -296,6 +307,152 @@ describe('SetupsSection', () => {
 
     expect(await screen.findByText('Setups can only be changed while online')).toBeInTheDocument();
     expect(screen.getByText('Office · Espresso')).toBeInTheDocument();
+  });
+
+  it('rejects a ratio above 30 and a whitespace-only name', async () => {
+    await renderLoaded([]);
+    fireEvent.click(screen.getByRole('button', { name: /add setup/i }));
+
+    type('Setup name', '   ');
+    type('Ratio (1:x)', '2');
+    fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
+    expect(await screen.findByText(/enter a name/i)).toBeInTheDocument();
+
+    type('Setup name', 'Weak');
+    type('Ratio (1:x)', '31');
+    fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
+    expect(await screen.findByText(/ratio can be at most 30/i)).toBeInTheDocument();
+    expect(api.createSetup).not.toHaveBeenCalled();
+  });
+
+  it('rejects a fractional target time', async () => {
+    await renderLoaded([]);
+    fireEvent.click(screen.getByRole('button', { name: /add setup/i }));
+    type('Setup name', 'Office');
+    type('Ratio (1:x)', '2');
+    fireEvent.change(screen.getByLabelText('Target time seconds'), { target: { value: '36.5' } });
+    fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
+
+    expect(await screen.findByText(/whole seconds/i)).toBeInTheDocument();
+    expect(api.createSetup).not.toHaveBeenCalled();
+  });
+
+  it('counts characters, not UTF-16 units, against the 80-character name limit', async () => {
+    await renderLoaded([]);
+    api.createSetup.mockResolvedValue(MINIMAL);
+    fireEvent.click(screen.getByRole('button', { name: /add setup/i }));
+    type('Setup name', '☕'.repeat(40) + '🫘'.repeat(40)); // 80 code points, 120 UTF-16 units
+    type('Ratio (1:x)', '2');
+    fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
+    await waitFor(() => expect(api.createSetup).toHaveBeenCalledTimes(1));
+  });
+
+  it('asks for a number when a numeric field holds something unparseable', () => {
+    const base = {
+      name: 'X',
+      brew_style: 'espresso',
+      ratio: '2',
+      dose: '',
+      target_time_s: '' as const,
+      grinder_name: '',
+      grind_setting: '',
+      machine_profile: ''
+    };
+    expect(buildInput({ ...base, ratio: 'abc' })).toMatch(/enter a number/i);
+    expect(buildInput({ ...base, dose: '1e' })).toMatch(/enter a number/i);
+    expect(buildInput(base)).toMatchObject({ ratio: 2, dose_g: null });
+  });
+
+  it('asks the user to sign in again on a 401', async () => {
+    await renderLoaded([]);
+    api.createSetup.mockRejectedValue(new AuthError());
+    fireEvent.click(screen.getByRole('button', { name: /add setup/i }));
+    type('Setup name', 'Office');
+    type('Ratio (1:x)', '2');
+    fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
+
+    expect(await screen.findByText(/sign in again/i)).toBeInTheDocument();
+    expect(screen.queryByText(OFFLINE)).toBeNull();
+  });
+
+  it('focuses the name field when the form opens', async () => {
+    await renderLoaded([OFFICE]);
+    fireEvent.click(screen.getByRole('button', { name: /add setup/i }));
+    expect(screen.getByLabelText('Setup name')).toHaveFocus();
+  });
+
+  it('names the form by its heading and announces loading', async () => {
+    let resolve!: (v: unknown[]) => void;
+    api.fetchSetups.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<SetupsSection />);
+    expect(screen.getByRole('status')).toHaveTextContent(/loading setups/i);
+    resolve([]);
+    fireEvent.click(await screen.findByRole('button', { name: /add setup/i }));
+    expect(screen.getByRole('form', { name: 'New setup' })).toBeInTheDocument();
+  });
+
+  it('locks Cancel and the row actions while a save is in flight, then closes the same form', async () => {
+    await renderLoaded([OFFICE, MINIMAL]);
+    let finish!: (v: unknown) => void;
+    api.updateSetup.mockReturnValue(new Promise((r) => (finish = r)));
+
+    fireEvent.click(screen.getByRole('button', { name: /edit office/i }));
+    type('Grind setting', '7');
+    fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled());
+    expect(screen.getByRole('button', { name: /edit plain v60/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /edit office/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /delete office/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /save setup/i })).toBeDisabled();
+
+    finish({ ...OFFICE, grind_setting: '7' });
+    await waitFor(() => expect(screen.queryByRole('button', { name: /save setup/i })).toBeNull());
+    expect(screen.getByRole('button', { name: /edit plain v60/i })).toBeEnabled();
+    expect(screen.getByText(/@ 7|, 7/)).toBeInTheDocument();
+  });
+
+  it('locks the actions while a delete is in flight', async () => {
+    await renderLoaded([OFFICE, MINIMAL]);
+    let finish!: () => void;
+    api.deleteSetup.mockReturnValue(new Promise<void>((r) => (finish = r)));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /delete office/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /add setup/i })).toBeDisabled());
+    expect(screen.getByRole('button', { name: /edit plain v60/i })).toBeDisabled();
+
+    finish();
+    await waitFor(() => expect(screen.queryByText('Office · Espresso')).toBeNull());
+    expect(screen.getByRole('button', { name: /add setup/i })).toBeEnabled();
+  });
+
+  it('shows each row\'s own target time when switching between edit forms', async () => {
+    await renderLoaded([OFFICE, { ...MINIMAL, target_time_s: 125 }, { ...MINIMAL, id: 's3', name: 'Zed' }]);
+
+    fireEvent.click(screen.getByRole('button', { name: /edit office/i }));
+    expect(screen.getByLabelText('Target time minutes')).toHaveValue(0);
+    expect(screen.getByLabelText('Target time seconds')).toHaveValue(36);
+
+    fireEvent.click(screen.getByRole('button', { name: /edit plain v60/i }));
+    expect(screen.getByLabelText('Setup name')).toHaveValue('Plain V60');
+    expect(screen.getByLabelText('Target time minutes')).toHaveValue(2);
+    expect(screen.getByLabelText('Target time seconds')).toHaveValue(5);
+
+    // A row without a time must not inherit the previous one's.
+    fireEvent.click(screen.getByRole('button', { name: /edit zed/i }));
+    expect(screen.getByLabelText('Setup name')).toHaveValue('Zed');
+    expect(screen.getByLabelText('Target time minutes')).toHaveValue(null);
+    expect(screen.getByLabelText('Target time seconds')).toHaveValue(null);
+  });
+
+  it('retries the load after a failure', async () => {
+    api.fetchSetups.mockRejectedValueOnce(new NetworkError()).mockResolvedValueOnce([OFFICE]);
+    render(<SetupsSection />);
+    fireEvent.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByText('Office · Espresso')).toBeInTheDocument();
+    expect(api.fetchSetups).toHaveBeenCalledTimes(2);
   });
 
   it('shows a quiet message when the list cannot be loaded', async () => {

@@ -11,7 +11,9 @@ vi.mock('../../lib/api', () => ({
   createSetup: vi.fn(),
   updateSetup: vi.fn(),
   deleteSetup: vi.fn(),
-  NetworkError: class extends Error {}
+  NetworkError: class extends Error {},
+  AuthError: class extends Error {},
+  ApiError: class extends Error {}
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -169,8 +171,8 @@ describe('Settings backup / restore', () => {
     expect('setups' in sent).toBe(false);
     expect(sent.beans).toHaveLength(2);
     expect(sent.brews).toHaveLength(1);
-    expect(await screen.findByText(/Restored 2 beans and 1 brew\./)).toBeInTheDocument();
-    expect(screen.queryByText(/\d+ setups?\b/i)).toBeNull();
+    const restoreStatus = await screen.findByText(/Restored 2 beans and 1 brew\./);
+    expect(restoreStatus.textContent).not.toMatch(/setup/i);
   });
 
   it('says setups were not restored when an older server returns no setup counts', async () => {

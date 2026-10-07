@@ -1,7 +1,15 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { MinSecInput } from './MinSecInput';
 import { usePreferences } from '../contexts/PreferencesContext';
-import { createSetup, deleteSetup, fetchSetups, NetworkError, updateSetup } from '../lib/api';
+import {
+  ApiError,
+  AuthError,
+  createSetup,
+  deleteSetup,
+  fetchSetups,
+  NetworkError,
+  updateSetup
+} from '../lib/api';
 import { roundYield } from '../lib/brewDraft';
 import { BREW_STYLE_PRESETS, brewStyleLabel, isBrewStyle } from '../lib/brewStyles';
 import { formatMinSec } from '../lib/time';
@@ -9,6 +17,7 @@ import type { BrewSetup, BrewSetupInput } from '../types';
 
 const OFFLINE_MESSAGE = 'Setups can only be changed while online';
 const DUPLICATE_MESSAGE = 'You already have a setup with that name';
+const SIGN_IN_MESSAGE = 'Please sign in again to manage your setups';
 
 // Limits mirror the API schema (backend/src/coffee_journal/schemas/setup.py).
 const NAME_MAX = 80;
@@ -76,14 +85,20 @@ function formFromSetup(setup: BrewSetup): FormState {
   };
 }
 
+// Length as the API counts it: code points, not UTF-16 units (an emoji is 1, not 2).
+const charCount = (value: string): number => [...value].length;
+
 const textOrNull = (value: string): string | null => value.trim() || null;
 
 /** Validate and convert the form into an API body, or return a message. */
-function buildInput(form: FormState): BrewSetupInput | string {
+export function buildInput(form: FormState): BrewSetupInput | string {
   const name = form.name.trim();
   if (!name) return 'Enter a name for the setup.';
-  if (name.length > NAME_MAX) return `Name must be ${NAME_MAX} characters or fewer.`;
+  if (charCount(name) > NAME_MAX) return `Name must be ${NAME_MAX} characters or fewer.`;
 
+  if (form.ratio.trim() !== '' && !Number.isFinite(Number(form.ratio))) {
+    return 'Enter a number for the ratio.';
+  }
   const ratio = form.ratio.trim() === '' ? NaN : Number(form.ratio);
   if (!Number.isFinite(ratio) || ratio <= 0) return 'Ratio must be greater than 0.';
   if (ratio > RATIO_MAX) return `Ratio can be at most ${RATIO_MAX}.`;
@@ -91,12 +106,15 @@ function buildInput(form: FormState): BrewSetupInput | string {
   let dose: number | null = null;
   if (form.dose.trim() !== '') {
     dose = Number(form.dose);
-    if (!Number.isFinite(dose) || dose <= 0) return 'Dose must be greater than 0.';
+    if (!Number.isFinite(dose)) return 'Enter a number for the dose.';
+    if (dose <= 0) return 'Dose must be greater than 0.';
   }
 
   const time = form.target_time_s;
-  if (time !== '' && (!Number.isFinite(time) || time < 0 || time > TIME_MAX_S)) {
-    return 'Target time must be between 0 seconds and 24 hours.';
+  if (time !== '') {
+    // The API stores whole seconds; a fractional or NaN time would be a 422.
+    if (!Number.isInteger(time)) return 'Target time must be in whole seconds.';
+    if (time < 0 || time > TIME_MAX_S) return 'Target time must be between 0 seconds and 24 hours.';
   }
 
   const grinder = textOrNull(form.grinder_name);
@@ -107,7 +125,7 @@ function buildInput(form: FormState): BrewSetupInput | string {
     ['Grind setting', setting],
     ['Machine profile', machine]
   ] as const) {
-    if (value && value.length > TEXT_MAX) return `${label} must be ${TEXT_MAX} characters or fewer.`;
+    if (value && charCount(value) > TEXT_MAX) return `${label} must be ${TEXT_MAX} characters or fewer.`;
   }
 
   return {
@@ -138,12 +156,14 @@ const byName = (a: BrewSetup, b: BrewSetup) =>
 
 function describeError(err: unknown): string {
   if (err instanceof NetworkError) return OFFLINE_MESSAGE;
-  if ((err as { status?: number } | null)?.status === 409) return DUPLICATE_MESSAGE;
+  if (err instanceof AuthError) return SIGN_IN_MESSAGE;
+  if (err instanceof ApiError && err.status === 409) return DUPLICATE_MESSAGE;
   return '';
 }
 
 const inputClass =
   'w-full rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-sm text-crema';
+const numberClass = `${inputClass} no-spinner`;
 const labelClass = 'text-xs uppercase tracking-[0.3em] text-moss';
 const primaryButton =
   'inline-flex min-h-11 items-center justify-center rounded-full bg-ember px-4 py-2 text-sm text-crema disabled:opacity-60';
@@ -221,21 +241,23 @@ export function SetupsSection() {
       return;
     }
 
+    // A late response may only close the form it was submitted from.
+    const submittedFrom = editing;
     setBusy(true);
     setFormError(null);
     try {
-      if (editing === 'new') {
+      if (submittedFrom === 'new') {
         const created = await createSetup(input);
         setSetups((prev) => [...prev, created].sort(byName));
       } else {
-        const original = setups.find((s) => s.id === editing);
+        const original = setups.find((s) => s.id === submittedFrom);
         const changes = original ? changedFields(original, input) : input;
         if (Object.keys(changes).length > 0) {
-          const saved = await updateSetup(editing, changes);
+          const saved = await updateSetup(submittedFrom, changes);
           setSetups((prev) => prev.map((s) => (s.id === saved.id ? saved : s)).sort(byName));
         }
       }
-      setEditing(null);
+      setEditing((current) => (current === submittedFrom ? null : current));
     } catch (err) {
       setFormError(describeError(err) || 'Could not save the setup. Please try again.');
     } finally {
@@ -248,12 +270,15 @@ export function SetupsSection() {
       return;
     }
     setNotice(null);
+    setBusy(true);
     try {
       await deleteSetup(setup.id);
       setSetups((prev) => prev.filter((s) => s.id !== setup.id));
       if (editing === setup.id) closeForm();
     } catch (err) {
       setNotice(describeError(err) || 'Could not delete the setup. Please try again.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -281,7 +306,11 @@ export function SetupsSection() {
         </p>
       )}
 
-      {loadState === 'loading' && <p className="text-sm text-moss">Loading setups...</p>}
+      {loadState === 'loading' && (
+        <p role="status" className="text-sm text-moss">
+          Loading setups...
+        </p>
+      )}
 
       {loadState === 'error' && (
         <div className="flex flex-wrap items-center gap-3 text-sm text-moss">
@@ -314,7 +343,8 @@ export function SetupsSection() {
                   <button
                     type="button"
                     aria-label={`Edit ${setup.name}`}
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs uppercase tracking-[0.3em] text-caramel"
+                    disabled={busy}
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs uppercase tracking-[0.3em] text-caramel disabled:opacity-50"
                     onClick={() => openEdit(setup)}
                   >
                     Edit
@@ -322,7 +352,8 @@ export function SetupsSection() {
                   <button
                     type="button"
                     aria-label={`Delete ${setup.name}`}
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs uppercase tracking-[0.3em] text-caramel"
+                    disabled={busy}
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs uppercase tracking-[0.3em] text-caramel disabled:opacity-50"
                     onClick={() => handleDelete(setup)}
                   >
                     Delete
@@ -333,19 +364,21 @@ export function SetupsSection() {
           </ul>
 
           {editing === null && (
-            <button type="button" className={primaryButton} onClick={openNew}>
+            <button type="button" className={primaryButton} onClick={openNew} disabled={busy}>
               Add setup
             </button>
           )}
 
           {editing !== null && (
             <form
+              // Remount per row so MinSecInput's own raw-string state never leaks between setups.
+              key={editing}
               noValidate
               onSubmit={handleSubmit}
-              aria-label={editing === 'new' ? 'New setup' : 'Edit setup'}
+              aria-labelledby="setup-form-heading"
               className="space-y-4 rounded-xl border border-caramel/40 p-4"
             >
-              <h3 className="text-lg font-display text-espresso">
+              <h3 id="setup-form-heading" className="text-lg font-display text-espresso">
                 {editing === 'new' ? 'New setup' : 'Edit setup'}
               </h3>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -353,6 +386,7 @@ export function SetupsSection() {
                   <input
                     id="setup-name"
                     type="text"
+                    autoFocus
                     value={form.name}
                     onChange={(e) => update('name', e.target.value)}
                     className={inputClass}
@@ -385,7 +419,7 @@ export function SetupsSection() {
                     min={0}
                     value={form.ratio}
                     onChange={(e) => update('ratio', e.target.value)}
-                    className={inputClass}
+                    className={numberClass}
                   />
                 </Field>
                 <Field id="setup-dose" label="Dose (g)">
@@ -397,7 +431,7 @@ export function SetupsSection() {
                     min={0}
                     value={form.dose}
                     onChange={(e) => update('dose', e.target.value)}
-                    className={inputClass}
+                    className={numberClass}
                   />
                 </Field>
                 <MinSecInput
@@ -452,7 +486,7 @@ export function SetupsSection() {
                 <button type="submit" className={primaryButton} disabled={busy}>
                   Save setup
                 </button>
-                <button type="button" className={secondaryButton} onClick={closeForm}>
+                <button type="button" className={`${secondaryButton} disabled:opacity-60`} onClick={closeForm} disabled={busy}>
                   Cancel
                 </button>
               </div>
