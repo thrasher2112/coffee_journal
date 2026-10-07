@@ -167,6 +167,18 @@ describe('applySetup', () => {
     expect(next).toMatchObject({ bean_weight_g: 20, water_weight_g: 160, brew_style: 'aeropress' });
   });
 
+  it('keeps a fractional setup dose unrounded and the yield to one decimal (18.2 g x 3 = 54.6 g)', () => {
+    const next = applySetup(makeDraft({ beanId: 'b' }), { ...office, dose_g: 18.2, ratio: 3 }, { advanced: false });
+    expect(next).toMatchObject({ bean_weight_g: 18.2, water_weight_g: 54.6 });
+  });
+
+  it('leaves the yield alone when dose x ratio would round below the smallest valid yield', () => {
+    const draft = makeDraft({ beanId: 'b' });
+    const next = applySetup(draft, { ...office, dose_g: 0.1, ratio: 0.4 }, { advanced: false });
+    expect(next.bean_weight_g).toBe(0.1);
+    expect(next.water_weight_g).toBe(draft.water_weight_g);
+  });
+
   it('leaves the yield alone when neither the setup nor the draft has a dose', () => {
     const draft = { ...makeDraft({ beanId: 'b' }), bean_weight_g: '' as number | '', water_weight_g: 123 as number | '' };
     const next = applySetup(draft, { ...office, dose_g: null }, { advanced: false });

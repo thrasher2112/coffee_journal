@@ -91,7 +91,12 @@ they are plain strings.
 validates against the same list); any unknown style already stored must render
 safely (fallback label, no crash on `BREW_STYLE_PRESETS[style]`).
 
-**Yield input.** `min={1} step={0.1}`; chip/setup yields round to one decimal.
+**Dose / yield inputs.** Dose `min={0.1} step="any"`, yield `min={0.1} step={0.1}`;
+chip/setup yields round to one decimal. Setup `dose_g` is held to the same 0.1 g
+floor (API `ge=0.1`, Settings check), and Settings refuses a dose x ratio that
+rounds below 0.1 g, so any setup can be applied and then saved. Machine profile
+is an editable field on the log form (always in the full form; in the quick form
+while the draft carries one) - a setup only suggests it.
 
 **Explicit form transitions (replaces the brewStyle effect).** Today
 `QuickLogBar.tsx` runs an effect on `brewStyle` change that resets yield to

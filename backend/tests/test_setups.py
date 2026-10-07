@@ -207,10 +207,16 @@ def test_non_finite_on_patch_422(auth_client):
         assert resp.status_code == 422, field
 
 
-@pytest.mark.parametrize("dose", [0, -5])
+@pytest.mark.parametrize("dose", [0, -5, 0.05, 0.09])
 def test_bad_dose_422(auth_client, dose):
     resp = auth_client.post("/api/setups", json={**BASE, "dose_g": dose})
     assert resp.status_code == 422
+
+
+def test_smallest_dose_ok(auth_client):
+    # Matches the log form's dose input (min 0.1), so an accepted setup dose can
+    # always be submitted as a brew.
+    assert _create(auth_client, dose_g=0.1)["dose_g"] == 0.1
 
 
 def test_negative_target_time_422(auth_client):

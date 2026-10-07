@@ -10,7 +10,7 @@ import {
   NetworkError,
   updateSetup
 } from '../lib/api';
-import { roundYield } from '../lib/brewDraft';
+import { MIN_DOSE_G, MIN_YIELD_G, roundYield } from '../lib/brewDraft';
 import { BREW_STYLE_PRESETS, brewStyleLabel, isBrewStyle } from '../lib/brewStyles';
 import { formatMinSec } from '../lib/time';
 import type { BrewSetup, BrewSetupInput } from '../types';
@@ -108,6 +108,11 @@ export function buildInput(form: FormState): BrewSetupInput | string {
     dose = Number(form.dose);
     if (!Number.isFinite(dose)) return 'Enter a number for the dose.';
     if (dose <= 0) return 'Dose must be greater than 0.';
+    // Same floor as the log form's dose input and the API.
+    if (dose < MIN_DOSE_G) return `Dose must be at least ${MIN_DOSE_G} g.`;
+    if (roundYield(dose * ratio) < MIN_YIELD_G) {
+      return `Dose × ratio must give a yield of at least ${MIN_YIELD_G} g.`;
+    }
   }
 
   const time = form.target_time_s;

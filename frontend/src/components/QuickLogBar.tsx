@@ -10,6 +10,8 @@ import type { TemperatureUnit } from '../contexts/PreferencesContext';
 import { BREW_STYLE_PRESETS, getBrewStylePreset, isBrewStyle } from '../lib/brewStyles';
 import {
   DEFAULT_STYLE,
+  MIN_DOSE_G,
+  MIN_YIELD_G,
   agitationTotalsFromEvents,
   applySetup,
   applyStyle,
@@ -247,6 +249,25 @@ export function QuickLogBar({
   const selectedGrinder = form.grinder_name ?? '';
   const extraGrinder = selectedGrinder && !grinderOptions.includes(selectedGrinder) ? selectedGrinder : undefined;
 
+  // Editable, because a setup only suggests the profile: a shot run on another
+  // DE1 profile must be recordable. Editing it changes neither setup_name nor
+  // the chip, and never the saved setup. The advanced form always has it; the
+  // quick form shows it only while the draft carries a profile (a setup
+  // brought one) - '' after clearing still counts, so the field does not vanish
+  // under the cursor. A blank profile is saved as none.
+  const machineProfileField = (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-xs uppercase tracking-[0.3em] text-moss">Machine profile</span>
+      <input
+        type="text"
+        maxLength={120}
+        value={form.machine_profile ?? ''}
+        onChange={(event) => update('machine_profile', event.target.value)}
+        className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
+      />
+    </label>
+  );
+
   const update = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => {
     touched.current = true;
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -348,7 +369,8 @@ export function QuickLogBar({
         water_weight_g: form.water_weight_g,
         water_temp_c: form.water_temp_c === '' ? undefined : form.water_temp_c,
         bloom_time_s: form.bloom_time_s === '' ? undefined : form.bloom_time_s,
-        total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s
+        total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s,
+        machine_profile: form.machine_profile?.trim() ? form.machine_profile.trim() : undefined
       };
       await onSave(payload);
       startFreshDraft(savedBeanId, savedStyle, savedSetup);
@@ -474,8 +496,8 @@ export function QuickLogBar({
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Dose (g)</span>
             <input
               type="number"
-              min={5}
-              step={0.5}
+              min={MIN_DOSE_G}
+              step="any"
               value={form.bean_weight_g === '' ? '' : form.bean_weight_g}
               onChange={(event) =>
                 update('bean_weight_g', event.target.value === '' ? '' : Number(event.target.value))
@@ -487,7 +509,7 @@ export function QuickLogBar({
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Yield (g)</span>
             <input
               type="number"
-              min={1}
+              min={MIN_YIELD_G}
               step={0.1}
               value={form.water_weight_g === '' ? '' : form.water_weight_g}
               onChange={(event) =>
@@ -523,6 +545,8 @@ export function QuickLogBar({
             );
           })}
         </div>
+
+        {!isAdvanced && form.machine_profile !== undefined && machineProfileField}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="flex flex-col gap-4 text-sm">
@@ -626,6 +650,7 @@ export function QuickLogBar({
                   className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
                 />
               </label>
+              {machineProfileField}
             </div>
             <div className="space-y-4">
               <FlavorWheel selected={form.flavor_tags} onToggle={toggleTag} />

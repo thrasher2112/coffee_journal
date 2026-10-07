@@ -363,6 +363,26 @@ describe('SetupsSection', () => {
     expect(buildInput(base)).toMatchObject({ ratio: 2, dose_g: null });
   });
 
+  it('keeps doses and yields inside what the log form accepts (>= 0.1 g)', () => {
+    const base = {
+      name: 'X',
+      brew_style: 'espresso',
+      ratio: '2',
+      dose: '',
+      target_time_s: '' as const,
+      grinder_name: '',
+      grind_setting: '',
+      machine_profile: ''
+    };
+    expect(buildInput({ ...base, dose: '0.05' })).toMatch(/at least 0\.1/i);
+    expect(buildInput({ ...base, dose: '0.1' })).toMatchObject({ dose_g: 0.1 });
+    expect(buildInput({ ...base, dose: '18.2', ratio: '3' })).toMatchObject({ dose_g: 18.2, ratio: 3 });
+    // dose x ratio rounds to 0.0 g: no usable yield
+    expect(buildInput({ ...base, dose: '0.1', ratio: '0.4' })).toMatch(/yield/i);
+    // no dose: the yield depends on the form's dose, nothing to check here
+    expect(buildInput({ ...base, ratio: '0.4' })).toMatchObject({ ratio: 0.4, dose_g: null });
+  });
+
   it('asks the user to sign in again on a 401', async () => {
     await renderLoaded([]);
     api.createSetup.mockRejectedValue(new AuthError());

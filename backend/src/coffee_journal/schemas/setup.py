@@ -22,7 +22,10 @@ SetupBrewStyle = Literal[*SETUP_BREW_STYLES]
 # allow_inf_nan=False: pydantic accepts NaN/Infinity on floats by default, and
 # Python's json module will happily emit them.
 Ratio = Annotated[float, Field(gt=0, le=30, allow_inf_nan=False)]
-DoseG = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+# 0.1 g is the smallest dose the log form accepts (its dose input has min 0.1),
+# so a setup dose can always be applied and submitted as a brew (the brew API
+# itself only requires > 0).
+DoseG = Annotated[float, Field(ge=0.1, allow_inf_nan=False)]
 Text80 = Annotated[str, StringConstraints(max_length=80)]
 Text120 = Annotated[str, StringConstraints(max_length=120)]
 # One day. Also keeps the value inside Postgres int4.

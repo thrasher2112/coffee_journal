@@ -37,6 +37,11 @@ export const DEFAULT_BEAN_WEIGHT_G = 18;
 export const DEFAULT_WATER_TEMP = 96;
 export const DEFAULT_BLOOM_TIME = 45;
 export const DEFAULT_BREW_TIME = 180;
+// Smallest dose and yield the log form accepts (the brew API needs > 0). Setup
+// doses are held to the same floor, in Settings and by the API, so any setup
+// can be applied and then saved.
+export const MIN_DOSE_G = 0.1;
+export const MIN_YIELD_G = 0.1;
 
 // Yields are shown and stored to one decimal.
 export const roundYield = (grams: number): number => Number(grams.toFixed(1));
@@ -134,7 +139,7 @@ export const setupChipLabel = (setup: Pick<BrewSetup, 'name' | 'ratio'>): string
 // through applyStyle (which would reset the yield to the style's first ratio
 // and clear bloom/total): the yield is the setup's dose x ratio, using the
 // setup's dose or else the draft's current numeric dose (with neither, the
-// yield is left alone). grinder_name, grind_setting, total_brew_time_s,
+// yield is left alone, as when it would round below MIN_YIELD_G). grinder_name, grind_setting, total_brew_time_s,
 // machine_profile and setup_name are replaced even when the setup leaves them
 // null, so nothing from a previous setup lingers. Setups carry no bloom, so
 // bloom is left as is - except an untouched bloom default carried from a
@@ -163,7 +168,13 @@ export function applySetup(draft: DraftForm, setup: BrewSetup, options: { advanc
     setup_name: setup.name,
   };
   if (typeof setup.dose_g === 'number') next.bean_weight_g = setup.dose_g;
-  if (dose !== undefined) next.water_weight_g = roundYield(dose * setup.ratio);
+  if (dose !== undefined) {
+    // A dose x ratio that rounds below the smallest valid yield (Settings
+    // refuses such a setup, but one may predate that) leaves the yield alone
+    // rather than writing a value the form would reject.
+    const water = roundYield(dose * setup.ratio);
+    if (water >= MIN_YIELD_G) next.water_weight_g = water;
+  }
   if (!hasTimedDefaults(setup.brew_style) && hasTimedDefaults(draft.brew_style)) {
     if (draft.bloom_time_s === DEFAULT_BLOOM_TIME) next.bloom_time_s = undefined;
   }

@@ -220,10 +220,12 @@ describe('QuickLogBar style transitions', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ water_weight_g: 45 }));
   });
 
-  it('yield input allows tenths and values down to 1 g', () => {
+  it('yield input allows tenths and values down to 0.1 g; dose accepts any decimal down to 0.1 g', () => {
     renderForm();
-    expect(yieldInput().min).toBe('1');
+    expect(yieldInput().min).toBe('0.1');
     expect(yieldInput().step).toBe('0.1');
+    expect(doseInput().min).toBe('0.1');
+    expect(doseInput().step).toBe('any');
   });
 
   it('does not reset the yield when only the dose changes under the current style', () => {
@@ -667,6 +669,100 @@ describe('QuickLogBar setups', () => {
       grinder_name: 'DE1 grinder',
     });
     expect(saved.bloom_time_s).toBeUndefined();
+  });
+
+  it('a Settings-style fractional dose (18.2 g, 1:3) applies and the form submits it unrounded', async () => {
+    const onSave = vi.fn();
+    const fractional: BrewSetup = { ...office, id: 'frac', name: 'Frac', dose_g: 18.2, ratio: 3 };
+    renderSetups({ setups: [fractional], userId: 'u1', onSave });
+    fireEvent.click(chip('Frac · 1:3'));
+    expect(doseInput().value).toBe('18.2');
+    expect(yieldInput().value).toBe('54.6');
+    expect(doseInput().checkValidity()).toBe(true);
+    expect(yieldInput().checkValidity()).toBe(true);
+    fireEvent.click(screen.getByText('Save quick brew'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ bean_weight_g: 18.2, water_weight_g: 54.6 }));
+  });
+
+  it('a hand-typed 17.35 g dose is valid too', () => {
+    renderSetups();
+    fireEvent.change(doseInput(), { target: { value: '17.35' } });
+    expect(doseInput().checkValidity()).toBe(true);
+  });
+
+  describe('machine profile', () => {
+    const profileInput = () => screen.getByLabelText('Machine profile') as HTMLInputElement;
+
+    it('is an editable field in the full form, filled from the setup, limited to 120 characters', () => {
+      renderSetups({ variant: 'full', setups, userId: 'u1' });
+      expect(profileInput().value).toBe('');
+      fireEvent.click(officeChip());
+      expect(profileInput().value).toBe('Extractamundo Dos!');
+      expect(profileInput().maxLength).toBe(120);
+    });
+
+    it('editing it keeps the chip and setup_name, and the payload carries the edited profile', async () => {
+      const onSave = vi.fn();
+      renderSetups({ variant: 'full', setups, userId: 'u1', onSave });
+      fireEvent.click(officeChip());
+      fireEvent.change(profileInput(), { target: { value: 'Londinium' } });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+      await clickSave('Save brew');
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ setup_name: 'Office · Espresso', machine_profile: 'Londinium' })
+      );
+    });
+
+    it('blank saves as no profile, while the chip stays', async () => {
+      const onSave = vi.fn();
+      renderSetups({ variant: 'full', setups, userId: 'u1', onSave });
+      fireEvent.click(officeChip());
+      fireEvent.change(profileInput(), { target: { value: '   ' } });
+      await clickSave('Save brew');
+      const saved = onSave.mock.calls[0][0] as BrewDraft;
+      expect(saved.machine_profile).toBeUndefined();
+      expect(saved.setup_name).toBe('Office · Espresso');
+    });
+
+    it('Reset puts the setup\'s profile back', () => {
+      renderSetups({ variant: 'full', setups, userId: 'u1' });
+      fireEvent.click(officeChip());
+      fireEvent.change(profileInput(), { target: { value: 'Londinium' } });
+      fireEvent.click(screen.getByText('Reset'));
+      expect(profileInput().value).toBe('Extractamundo Dos!');
+    });
+
+    it('can be typed into a full form with no setup at all', async () => {
+      const onSave = vi.fn();
+      renderSetups({ variant: 'full', onSave });
+      fireEvent.change(profileInput(), { target: { value: 'Flat 9' } });
+      await clickSave('Save brew');
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ machine_profile: 'Flat 9' }));
+    });
+
+    it('quick form: hidden without a profile, shown once a setup brings one, and kept while cleared', () => {
+      renderSetups({ setups, userId: 'u1' });
+      expect(screen.queryByLabelText('Machine profile')).not.toBeInTheDocument();
+      fireEvent.click(officeChip());
+      expect(profileInput().value).toBe('Extractamundo Dos!');
+      fireEvent.change(profileInput(), { target: { value: '' } });
+      expect(profileInput().value).toBe(''); // still there to type into
+      fireEvent.click(homeChip()); // a setup with no profile
+      expect(screen.queryByLabelText('Machine profile')).not.toBeInTheDocument();
+    });
+
+    it('quick form: editing the profile keeps the chip and the saved payload', async () => {
+      const onSave = vi.fn();
+      renderSetups({ setups, userId: 'u1', onSave });
+      fireEvent.click(officeChip());
+      fireEvent.change(profileInput(), { target: { value: 'Blooming' } });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+      await clickSave('Save quick brew');
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ setup_name: 'Office · Espresso', machine_profile: 'Blooming' })
+      );
+    });
   });
 
   it('switching chips applies the other one; the previous setup leaves nothing behind', () => {
