@@ -50,6 +50,12 @@ describe('BrewCard', () => {
     expect(screen.queryByText('Home · AeroPress')).not.toBeInTheDocument();
   });
 
+  it('lets a long setup name and profile wrap', () => {
+    render(<BrewCard brew={{ ...baseBrew, setup_name: 'Office · Espresso', machine_profile: 'Extractamundo Dos!' }} />);
+    expect(screen.getByText('Office · Espresso')).toHaveClass('break-words');
+    expect(screen.getByText('Profile: Extractamundo Dos!')).toHaveClass('break-words');
+  });
+
   it('adds nothing for provenance when absent or null', () => {
     const { container } = render(<BrewCard brew={{ ...baseBrew, setup_name: null, machine_profile: null }} />);
     expect(screen.queryByText(/Profile:/)).not.toBeInTheDocument();

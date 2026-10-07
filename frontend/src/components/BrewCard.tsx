@@ -46,8 +46,8 @@ export function BrewCard({ brew }: Props) {
           <p className="text-xs text-moss">ratio {brew.ratio ?? '-'}</p>
           {(brew.setup_name || brew.machine_profile) && (
             <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-moss/80">
-              {brew.setup_name && <span>{brew.setup_name}</span>}
-              {brew.machine_profile && <span className="italic">Profile: {brew.machine_profile}</span>}
+              {brew.setup_name && <span className="break-words">{brew.setup_name}</span>}
+              {brew.machine_profile && <span className="break-words italic">Profile: {brew.machine_profile}</span>}
             </p>
           )}
         </div>

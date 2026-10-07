@@ -744,17 +744,83 @@ describe('QuickLogBar setups', () => {
     expect(saved).toMatchObject({ brew_style: 'espresso', water_weight_g: 54 });
   });
 
-  it('editing a field after applying keeps the setup name and the chip', async () => {
+  it('editing a non-style field after applying keeps the setup name and the chip', async () => {
     const onSave = vi.fn();
     renderSetups({ setups, userId: 'u1', onSave });
     fireEvent.click(officeChip());
     fireEvent.change(yieldInput(), { target: { value: '40' } });
-    fireEvent.change(styleSelect(), { target: { value: 'pour-over' } });
+    fireEvent.change(doseInput(), { target: { value: '17' } });
     expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
     await clickSave('Save quick brew');
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ setup_name: 'Office · Espresso', machine_profile: 'Extractamundo Dos!' })
     );
+  });
+
+  describe('changing the style away from the selected setup', () => {
+    it('deselects the chip and drops setup_name/machine_profile, keeping the user\'s style through save', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      renderSetups({ setups, userId: 'u1', onSave });
+      fireEvent.click(officeChip());
+      fireEvent.change(styleSelect(), { target: { value: 'pour-over' } });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+      expect(styleSelect().value).toBe('pour-over');
+      await clickSave('Save quick brew');
+      const saved = onSave.mock.calls[0][0] as BrewDraft;
+      expect(saved.brew_style).toBe('pour-over');
+      expect(saved.setup_name).toBeUndefined();
+      expect(saved.machine_profile).toBeUndefined();
+      // the next draft is not pulled back to the setup's style
+      await waitFor(() => expect(doseInput().value).toBe('18'));
+      expect(styleSelect().value).toBe('pour-over');
+      expect(yieldInput().value).toBe('270');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('Reset keeps the user\'s style instead of flipping back to the setup\'s', () => {
+      renderSetups({ setups, userId: 'u1' });
+      fireEvent.click(officeChip());
+      fireEvent.change(styleSelect(), { target: { value: 'aeropress' } });
+      fireEvent.click(screen.getByText('Reset'));
+      expect(styleSelect().value).toBe('aeropress');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('picking the same style keeps the setup', async () => {
+      const onSave = vi.fn();
+      renderSetups({ setups, userId: 'u1', onSave });
+      fireEvent.click(officeChip());
+      fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+      await clickSave('Save quick brew');
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ setup_name: 'Office · Espresso' }));
+    });
+
+    it('keeps the last-used storage as the last chip tapped', () => {
+      renderSetups({ setups, userId: 'u1' });
+      fireEvent.click(officeChip());
+      fireEvent.change(styleSelect(), { target: { value: 'pour-over' } });
+      expect(localStorage.getItem(lastSetupKey('u1'))).toBe('office');
+    });
+
+    it('an orphaned setup_name (no matching setup) is kept as a historical snapshot, with no chip', async () => {
+      const onSave = vi.fn();
+      renderSetups({ setups, userId: 'u1', onSave, initialDraft: { ...baseDraft, setup_name: 'Gone', machine_profile: 'P' } });
+      fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
+      await clickSave('Save quick brew');
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ setup_name: 'Gone', machine_profile: 'P' }));
+    });
+  });
+
+  it('disables the chips while a save is in flight', async () => {
+    let finish!: () => void;
+    const onSave = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    renderSetups({ setups, userId: 'u1', onSave });
+    fireEvent.click(screen.getByText('Save quick brew'));
+    await waitFor(() => expect(officeChip()).toBeDisabled());
+    expect(homeChip()).toBeDisabled();
+    finish();
+    await waitFor(() => expect(officeChip()).not.toBeDisabled());
   });
 
   describe('last used', () => {
@@ -839,6 +905,21 @@ describe('QuickLogBar setups', () => {
       rerenderWith({ setups, userId: 'u1' });
       expect(homeChip()).toHaveAttribute('aria-pressed', 'true');
       expect(styleSelect().value).toBe('aeropress');
+    });
+
+    it.each([
+      ['a style pick', () => fireEvent.change(styleSelect(), { target: { value: 'aeropress' } })],
+      ['a yield edit', () => fireEvent.change(yieldInput(), { target: { value: '99' } })],
+      ['a grinder change', () => fireEvent.change(grinderSelect(), { target: { value: 'Niche' } })],
+      ['a flavor tag', () => fireEvent.click(screen.getByRole('button', { name: 'Citrus' }))],
+    ])('%s before setups arrive blocks the late auto-apply', (_label, edit) => {
+      mockPrefs.grinders = ['Niche'];
+      localStorage.setItem(key, 'office');
+      const { rerenderWith } = renderSetups({ variant: 'full', setups: [], userId: 'u1' });
+      edit();
+      rerenderWith({ variant: 'full', setups, userId: 'u1' });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+      expect(styleSelect().value).not.toBe('espresso');
     });
 
     it('applies at most once per fresh draft: a later setups update does not re-apply', () => {

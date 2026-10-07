@@ -46,6 +46,12 @@ interface Props {
 
 const NO_SETUPS: BrewSetup[] = [];
 
+// Names are unique per user, case-insensitively (the server 409s a duplicate).
+const findSetupByName = (setups: BrewSetup[], name: string | null | undefined) => {
+  const wanted = name?.toLowerCase();
+  return wanted ? setups.find((setup) => setup.name.toLowerCase() === wanted) : undefined;
+};
+
 const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
   if (celsius === '' || celsius === undefined) return '';
   if (typeof celsius !== 'number' || Number.isNaN(celsius)) return '';
@@ -104,10 +110,12 @@ export function QuickLogBar({
   // names are unique per user), so it is one source of truth: an incoming
   // draft shows its chip selected with no re-apply, editing fields leaves it
   // selected ("started from"), and deselecting clears setup_name.
-  const selectedSetup = useMemo(() => {
-    const name = form.setup_name?.toLowerCase();
-    return name ? setups.find((setup) => setup.name.toLowerCase() === name) : undefined;
-  }, [form.setup_name, setups]);
+  //
+  // A setup_name with no matching setup (the setup was renamed or deleted
+  // since, or the setups failed to load) is kept on purpose: it is the
+  // historical snapshot of what this brew started from. It just has no chip,
+  // and nothing re-applies or clears it.
+  const selectedSetup = useMemo(() => findSetupByName(setups, form.setup_name), [form.setup_name, setups]);
 
   // Keep the water-temp text buffer in step with the draft's value (a default
   // applied, a reset, a unit switch) without fighting an edit in progress:
@@ -175,7 +183,20 @@ export function QuickLogBar({
 
   const handleStyleChange = (style: string) => {
     touched.current = true;
-    setForm((prev) => applyStyle(prev, style, { advanced: isAdvanced }));
+    setForm((prev) => {
+      const next = applyStyle(prev, style, { advanced: isAdvanced });
+      // Moving to a different style than the selected setup's means the brew is
+      // no longer "from" it: drop the provenance in the same update (the chip
+      // deselects, and Reset/save won't re-apply the setup and flip the style
+      // back). The same style keeps it. The remembered last-used id is left
+      // alone: it records the last chip tapped, not what the form holds.
+      const from = findSetupByName(setups, prev.setup_name);
+      if (from && from.brew_style !== style) {
+        next.setup_name = undefined;
+        next.machine_profile = undefined;
+      }
+      return next;
+    });
   };
 
   // A fresh draft (Reset, or after a save) for the style currently selected,
@@ -429,8 +450,9 @@ export function QuickLogBar({
                   key={setup.id}
                   type="button"
                   aria-pressed={isSelected}
+                  disabled={saving}
                   onClick={() => handleSetupChip(setup)}
-                  className={`min-h-11 rounded-full border px-4 py-1 text-sm ${
+                  className={`min-h-11 rounded-full border px-4 py-1 text-sm disabled:opacity-60 ${
                     isSelected ? 'border-ember bg-ember/90 text-crema' : 'border-caramel/40 text-espresso'
                   }`}
                 >
@@ -441,6 +463,8 @@ export function QuickLogBar({
           </div>
         )}
         <div className="grid gap-4 md:grid-cols-3">
+          {/* Raw setForm, not update(): picking a bean is not an edit that should
+              block the last-used auto-apply (a setup never touches the bean). */}
           <BeanPicker
             beans={beans}
             value={form.bean_id}
