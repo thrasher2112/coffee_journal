@@ -454,6 +454,72 @@ def test_import_intra_payload_duplicate_names_create_one_skip_one(auth_client):
     assert only["brew_style"] == "espresso"
 
 
+def test_import_setup_with_own_existing_id_but_new_name_gets_a_fresh_id(auth_client):
+    existing = _setup(auth_client, "Office", ratio=3)
+
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {
+                    "id": existing["id"],
+                    "name": "Home",
+                    "brew_style": "pour-over",
+                    "ratio": 16,
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["counts"]["setups"] == 1
+    by_name = {s["name"]: s for s in _setups(auth_client)}
+    # The existing row is not overwritten by the colliding id...
+    assert by_name["Office"] == existing
+    # ...and the incoming one is created alongside it.
+    assert by_name["Home"]["id"] != existing["id"]
+    assert by_name["Home"]["ratio"] == 16
+
+
+def test_import_partial_duplicates_create_the_rest(auth_client):
+    existing = _setup(auth_client, "Dup", ratio=3)
+
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {"name": "One", "brew_style": "espresso", "ratio": 2},
+                {"name": "dup", "brew_style": "pour-over", "ratio": 16},
+                {"name": "Two", "brew_style": "espresso", "ratio": 2},
+            ]
+        },
+    )
+
+    assert resp.status_code == 202, resp.text
+    counts = resp.json()["counts"]
+    assert counts["setups"] == 2
+    assert counts["setups_skipped"] == 1
+    by_name = {s["name"]: s for s in _setups(auth_client)}
+    assert set(by_name) == {"Dup", "One", "Two"}
+    assert by_name["Dup"] == existing
+
+
+def test_import_setups_cap_is_1000(auth_client):
+    def many(n):
+        return {
+            "setups": [
+                {"name": f"S{i}", "brew_style": "espresso", "ratio": 2} for i in range(n)
+            ]
+        }
+
+    assert auth_client.post("/api/import", json=many(1001)).status_code == 422
+    assert auth_client.get("/api/setups").json() == []
+    # Well past the old 200 cap: an account's own backup must restore.
+    resp = auth_client.post("/api/import", json=many(250))
+    assert resp.status_code == 202
+    assert resp.json()["counts"]["setups"] == 250
+
+
 def test_import_without_setups_key_still_works(auth_client):
     """A version-1 backup has no setups at all."""
     resp = auth_client.post(
@@ -485,6 +551,52 @@ def test_import_invalid_setup_is_422_before_any_write(auth_client):
     assert resp.status_code == 422
     assert auth_client.get("/api/beans/").json()["total"] == 0
     assert _setups(auth_client) == []
+
+
+def test_import_setup_with_empty_id_is_422(auth_client):
+    """An empty id would become a primary key nobody can address."""
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {"id": "", "name": "A", "brew_style": "espresso", "ratio": 2},
+                {"id": "", "name": "B", "brew_style": "espresso", "ratio": 2},
+            ]
+        },
+    )
+
+    assert resp.status_code == 422
+    assert _setups(auth_client) == []
+
+
+def test_import_loop_treats_a_falsy_setup_id_as_absent(db_session, test_user):
+    """Belt and braces behind the schema: bypass validation and call the view."""
+    from coffee_journal.models import BrewSetup
+    from coffee_journal.routers.data import import_data
+    from coffee_journal.schemas.brew import ImportPayload
+    from coffee_journal.schemas.setup import SetupImport
+
+    def raw(name):
+        return SetupImport.model_construct(
+            _fields_set={"id", "name", "brew_style", "ratio"},
+            id="",
+            name=name,
+            brew_style="espresso",
+            ratio=2.0,
+        )
+
+    payload = ImportPayload.model_construct(
+        _fields_set={"setups"}, beans=[], brews=[], preferences=None,
+        setups=[raw("A"), raw("B")],
+    )
+
+    result = import_data.__wrapped__(
+        request=None, payload=payload, db=db_session, current_user=test_user
+    )
+
+    assert result["counts"]["setups"] == 2
+    ids = [s.id for s in db_session.query(BrewSetup).all()]
+    assert len(ids) == 2 and all(ids)
 
 
 def test_import_setup_with_blank_name_or_oversized_id_is_422(auth_client):

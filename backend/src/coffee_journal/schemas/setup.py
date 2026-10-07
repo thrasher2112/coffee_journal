@@ -57,11 +57,12 @@ class SetupImport(SetupCreate):
     """A setup from a backup file: the POST /api/setups rules, plus its old id.
 
     Timestamps in the file are ignored (unknown keys are dropped), as they are
-    for beans and brews. The id cap matches the column, so an oversized id is a
-    422 up front instead of a database error mid-import.
+    for beans and brews. The id bounds match the column (and forbid "", which
+    would become an unaddressable primary key), so a bad id is a 422 up front
+    instead of a database error mid-import.
     """
 
-    id: str | None = Field(None, max_length=36)
+    id: str | None = Field(None, min_length=1, max_length=36)
 
 
 class SetupUpdate(BaseModel):

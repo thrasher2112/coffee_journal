@@ -118,7 +118,7 @@ class ImportPayload(BaseModel):
     # server-side, still import cleanly.
     preferences: PreferencesUpdate | None = None
     # Optional so version-1 backups, written before setups existed, still import.
-    setups: list[SetupImport] = Field(default_factory=list, max_length=200)
+    setups: list[SetupImport] = Field(default_factory=list, max_length=1000)
 
 
 class BrewImport(BrewCreate):

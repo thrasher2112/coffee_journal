@@ -156,29 +156,28 @@ def import_data(
     # carry only a plain-text snapshot of their setup, so nothing to remap.
     #
     # Restore never merges or overwrites: a setup whose name (trimmed,
-    # case-insensitive) is already in use - on the account, or earlier in this
-    # same file - is skipped and the existing one is left exactly as it is.
-    seen_setup_names: set[str] = set()
+    # case-insensitive) is already in use - on the account, or created earlier
+    # in this same file - is skipped and the existing one is left exactly as it
+    # is. Rows commit one at a time, so create_setup's DB-side name check sees
+    # earlier rows from this file too; no separate in-memory tracking.
     for setup in payload.setups:
-        key = setup.name.lower()
-        if key in seen_setup_names:
-            imported["setups_skipped"] += 1
-            continue
-        seen_setup_names.add(key)
-
         data = setup.model_dump(exclude_unset=True)
-        incoming_id = data.get("id")
+        # An empty id is "no id" (the schema already rejects it; this keeps the
+        # view safe on its own).
+        incoming_id = data.pop("id", None) or None
         data["user_id"] = current_user.id
-        # Same keep-the-id-if-free rule as beans and brews. An id held by
-        # another account's setup (or by one of ours under a different name)
-        # would violate the primary key, so it gets a fresh one instead.
-        if _id_taken(db, BrewSetup, incoming_id):
-            data.pop("id", None)
+        # Same keep-the-id-if-free rule as beans and brews, but with no update
+        # path: an id already in use - by another account's setup, or by one of
+        # OUR OWN under a different name - is never reused, so that existing row
+        # is left untouched and the incoming setup is created beside it with a
+        # fresh id. (Same name + own id is skipped by the name check below.)
+        if incoming_id and not _id_taken(db, BrewSetup, incoming_id):
+            data["id"] = incoming_id
         try:
             crud.setup.create_setup(db, data)
         except crud.setup.DuplicateSetupName:
-            # create_setup pre-checks the name; this also covers a concurrent
-            # writer (or a lower() the DB folds differently from Python).
+            # Also covers a concurrent writer tripping the unique index after
+            # the pre-check, or a lower() the DB folds differently from Python.
             imported["setups_skipped"] += 1
             continue
         imported["setups"] += 1

@@ -168,6 +168,18 @@ describe('Settings backup / restore', () => {
     expect(screen.queryByText(/setup/i)).toBeNull();
   });
 
+  it('says setups were not restored when an older server returns no setup counts', async () => {
+    api.importData.mockResolvedValue({ status: 'imported', counts: { beans: 1, brews: 0 } });
+
+    openModal();
+    await restoreFile({ version: 2, beans: [{ id: 'b1', name: 'Bean' }], brews: [], setups: [SETUP] });
+
+    expect(
+      await screen.findByText(/setups were not restored because the server does not support them/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 setups/)).toBeNull();
+  });
+
   it('tolerates a server that returns no counts', async () => {
     api.importData.mockResolvedValue(undefined);
 

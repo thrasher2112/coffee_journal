@@ -107,10 +107,15 @@ export function SettingsPage() {
         `${beanCount} bean${beanCount === 1 ? '' : 's'}`,
         `${brewCount} brew${brewCount === 1 ? '' : 's'}`
       ];
-      if (setupsInFile || setupsRestored || setupsSkipped) {
+      // An older server ignores the `setups` key and reports no setup count;
+      // saying "0 setups restored" there would read as a clean restore.
+      const setupsUnsupported = setupsInFile > 0 && result?.counts?.setups === undefined;
+      if (!setupsUnsupported && (setupsInFile || setupsRestored || setupsSkipped)) {
         parts.push(`${setupsRestored} setup${setupsRestored === 1 ? '' : 's'}`);
       }
-      const skippedNote = setupsSkipped
+      const skippedNote = setupsUnsupported
+        ? ' Setups were not restored because the server does not support them.'
+        : setupsSkipped
         ? ` ${setupsSkipped} setup${setupsSkipped === 1 ? '' : 's'} already existed and ` +
           `${setupsSkipped === 1 ? 'was' : 'were'} kept as-is.`
         : '';
