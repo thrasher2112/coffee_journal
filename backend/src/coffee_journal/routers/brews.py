@@ -77,7 +77,7 @@ def get_last_grind(
     """Prefill source for the grind input: the grind the user last used for this
     bean on this grinder.
 
-    200 with ``{"grind_setting", "date"}`` (the brew's date), or 200 with a JSON
+    200 with ``{"grind_setting", "date", "created_at"}`` (the brew's date and log time), or 200 with a JSON
     ``null`` body when there is no such brew - including when the bean id belongs
     to someone else or does not exist, so the endpoint reveals nothing about
     other accounts. "No suggestion" is an ordinary answer, not an error, hence
@@ -86,7 +86,9 @@ def get_last_grind(
     brew = crud.brew.last_grind(db, current_user.id, bean_id, grinder_name)
     if brew is None:
         return None
-    return LastGrind(grind_setting=brew.grind_setting.strip(), date=brew.date)
+    return LastGrind(
+        grind_setting=brew.grind_setting.strip(), date=brew.date, created_at=brew.created_at
+    )
 
 
 @router.get("/{brew_id}", response_model=BrewRead)

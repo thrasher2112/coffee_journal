@@ -55,6 +55,9 @@ class LastGrind(BaseModel):
 
     grind_setting: str
     date: dt.date
+    # When the brew was logged: the tiebreak against same-day brews that are
+    # still queued on the client (it has no other way to order them).
+    created_at: dt.datetime
 
 
 class BrewCreate(BrewBase):

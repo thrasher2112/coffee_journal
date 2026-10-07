@@ -38,7 +38,11 @@ def test_returns_grind_and_brew_date(auth_client):
     resp = _last(auth_client, bean)
 
     assert resp.status_code == 200
-    assert resp.json() == {"grind_setting": "14.5", "date": "2026-10-03"}
+    body = resp.json()
+    assert body["grind_setting"] == "14.5"
+    assert body["date"] == "2026-10-03"
+    # The client compares this with brews still queued on the device.
+    assert body["created_at"]
 
 
 def test_none_is_200_with_null_body(auth_client):
@@ -77,7 +81,8 @@ def test_newest_date_wins_regardless_of_insertion_order(auth_client):
     _brew(auth_client, bean, date="2026-10-05", grind="newest")
     _brew(auth_client, bean, date="2026-10-01", grind="older")  # logged later
 
-    assert _last(auth_client, bean).json() == {"grind_setting": "newest", "date": "2026-10-05"}
+    body = _last(auth_client, bean).json()
+    assert (body["grind_setting"], body["date"]) == ("newest", "2026-10-05")
 
 
 def test_same_date_falls_back_to_created_at(auth_client):
@@ -118,7 +123,8 @@ def test_empty_or_null_grind_is_skipped(auth_client, blank):
     _brew(auth_client, bean, date="2026-10-01", grind="14")
     _brew(auth_client, bean, date="2026-10-05", grind=blank)  # newer, but no grind
 
-    assert _last(auth_client, bean).json() == {"grind_setting": "14", "date": "2026-10-01"}
+    body = _last(auth_client, bean).json()
+    assert (body["grind_setting"], body["date"]) == ("14", "2026-10-01")
 
 
 @pytest.mark.parametrize("blank", ["\t", "\n", " \t \n "])
@@ -127,7 +133,8 @@ def test_whitespace_other_than_spaces_is_blank_and_hides_nothing(auth_client, bl
     _brew(auth_client, bean, date="2026-10-01", grind="14")
     _brew(auth_client, bean, date="2026-10-05", grind=blank)  # newer, tab/newline only
 
-    assert _last(auth_client, bean).json() == {"grind_setting": "14", "date": "2026-10-01"}
+    body = _last(auth_client, bean).json()
+    assert (body["grind_setting"], body["date"]) == ("14", "2026-10-01")
 
 
 def test_only_tab_grinds_gives_null(auth_client):
