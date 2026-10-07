@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { AromaTag, Bean, BrewDraft, FlavorTag } from '../types';
+import type { AromaTag, Bean, BrewDraft, BrewSetup, FlavorTag } from '../types';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
 import { AromaTags } from './AromaTags';
@@ -11,12 +11,15 @@ import { BREW_STYLE_PRESETS, getBrewStylePreset, isBrewStyle } from '../lib/brew
 import {
   DEFAULT_STYLE,
   agitationTotalsFromEvents,
+  applySetup,
   applyStyle,
   makeDraft,
   roundYield,
+  setupChipLabel,
   withAdvancedDefaults,
   type DraftForm,
 } from '../lib/brewDraft';
+import { readLastSetupId, writeLastSetupId } from '../lib/lastSetup';
 
 interface Props {
   beans: Bean[];
@@ -33,7 +36,15 @@ interface Props {
   // navigating to /brew, so switching to the full form doesn't lose
   // whatever was already typed in.
   initialDraft?: DraftForm;
+  // Saved setups for the chip row, loaded by the page alongside beans. Empty
+  // (not loaded yet, or the fetch failed) renders no chips.
+  setups?: BrewSetup[];
+  // Scopes the remembered last-used setup. Without it that is neither read
+  // nor written.
+  userId?: string;
 }
+
+const NO_SETUPS: BrewSetup[] = [];
 
 const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
   if (celsius === '' || celsius === undefined) return '';
@@ -41,7 +52,15 @@ const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) 
   return unit === 'fahrenheit' ? Math.round((celsius * 9) / 5 + 32).toString() : celsius.toString();
 };
 
-export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', initialDraft }: Props) {
+export function QuickLogBar({
+  beans,
+  onSave,
+  defaultBeanId,
+  variant = 'quick',
+  initialDraft,
+  setups = NO_SETUPS,
+  userId,
+}: Props) {
   const { preferences, setPreferredGrinder } = usePreferences();
   const [isAdvanced, setIsAdvanced] = useState(variant === 'full');
   // form.brew_style is the single source of truth for the style. State
@@ -73,6 +92,22 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   // fresh draft and clear it. Any code that applies a draft with a deliberate
   // grinder choice (e.g. a setup) must set this too.
   const grinderDecided = useRef(initialDraft !== undefined);
+  // The last-used setup auto-applies at most once per fresh draft, and never
+  // over an incoming draft, a chip the user already picked, or edits they have
+  // already made (setups can arrive after the form is on screen).
+  // `touched` flips on the first user edit; Reset/save start a fresh draft,
+  // which resolves the setup question itself (see startFreshDraft).
+  const autoApplyDone = useRef(initialDraft !== undefined);
+  const touched = useRef(false);
+
+  // The selected chip is derived from the draft's setup_name (case-insensitive;
+  // names are unique per user), so it is one source of truth: an incoming
+  // draft shows its chip selected with no re-apply, editing fields leaves it
+  // selected ("started from"), and deselecting clears setup_name.
+  const selectedSetup = useMemo(() => {
+    const name = form.setup_name?.toLowerCase();
+    return name ? setups.find((setup) => setup.name.toLowerCase() === name) : undefined;
+  }, [form.setup_name, setups]);
 
   // Keep the water-temp text buffer in step with the draft's value (a default
   // applied, a reset, a unit switch) without fighting an edit in progress:
@@ -105,22 +140,66 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
     setForm((prev) => (prev.grinder_name ? prev : { ...prev, grinder_name: preferences.preferredGrinder }));
   }, [preferences.preferredGrinder]);
 
+  // Replace all setup-controlled fields in one update. The grinder is decided
+  // by the setup even when it names none, so hydration leaves it alone.
+  const applySetupToForm = (setup: BrewSetup) => {
+    grinderDecided.current = true;
+    setForm((prev) => applySetup(prev, setup, { advanced: isAdvanced }));
+  };
+
+  // Last-used setup, once setups have loaded. A remembered id that no longer
+  // exists is ignored silently. Whatever the outcome, the one-shot is spent.
+  useEffect(() => {
+    if (autoApplyDone.current || !userId || setups.length === 0) return;
+    autoApplyDone.current = true;
+    if (touched.current) return;
+    const remembered = readLastSetupId(userId);
+    const setup = remembered ? setups.find((item) => item.id === remembered) : undefined;
+    if (setup) applySetupToForm(setup);
+    // applySetupToForm only reads isAdvanced as of this render; the effect is
+    // keyed on the data that arrives (setups, userId), not on it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setups, userId]);
+
+  const handleSetupChip = (setup: BrewSetup) => {
+    autoApplyDone.current = true;
+    if (selectedSetup?.id === setup.id) {
+      // Deselect: keep every value, drop the provenance.
+      setForm((prev) => ({ ...prev, setup_name: undefined, machine_profile: undefined }));
+      writeLastSetupId(userId, null);
+      return;
+    }
+    applySetupToForm(setup);
+    writeLastSetupId(userId, setup.id);
+  };
+
   const handleStyleChange = (style: string) => {
+    touched.current = true;
     setForm((prev) => applyStyle(prev, style, { advanced: isAdvanced }));
   };
 
-  // A fresh draft (Reset, or after a save) for the style currently selected.
-  const startFreshDraft = (beanId: string | undefined, style: string | undefined) => {
-    grinderDecided.current = false;
+  // A fresh draft (Reset, or after a save) for the style currently selected,
+  // built in one go: if a setup was selected it is re-applied onto the fresh
+  // draft (its style wins), otherwise the style's defaults stand.
+  const startFreshDraft = (
+    beanId: string | undefined,
+    style: string | undefined,
+    setup: BrewSetup | undefined
+  ) => {
+    autoApplyDone.current = true;
+    touched.current = false;
     setAgitationTotals([]);
-    setForm(
-      makeDraft({
-        beanId,
-        style: style || DEFAULT_STYLE,
-        grinder: preferences.preferredGrinder,
-        advanced: isAdvanced,
-      })
-    );
+    let draft = makeDraft({
+      beanId,
+      style: style || DEFAULT_STYLE,
+      grinder: preferences.preferredGrinder,
+      advanced: isAdvanced,
+    });
+    // A setup also decides the grinder (even an empty one); without one, the
+    // preferred grinder hydrates again.
+    grinderDecided.current = setup !== undefined;
+    if (setup) draft = applySetup(draft, setup, { advanced: isAdvanced });
+    setForm(draft);
   };
 
   const handleAdvancedToggle = (checked: boolean) => {
@@ -141,14 +220,19 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   // ratio chips, and the select shows the raw value as an extra option.
   const stylePresets = getBrewStylePreset(brewStyle);
   const grinderOptions = preferences.grinders;
-  const selectedGrinder =
-    form.grinder_name && grinderOptions.includes(form.grinder_name) ? form.grinder_name : '';
+  // A grinder named by a setup or an incoming draft that is not in the
+  // preferences list still shows as selected, as an extra option (preferences
+  // are not written to).
+  const selectedGrinder = form.grinder_name ?? '';
+  const extraGrinder = selectedGrinder && !grinderOptions.includes(selectedGrinder) ? selectedGrinder : undefined;
 
   const update = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => {
+    touched.current = true;
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const toggleTag = (tag: FlavorTag) => {
+    touched.current = true;
     setForm((prev) => {
       const exists = prev.flavor_tags.includes(tag);
       return {
@@ -159,6 +243,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   };
 
   const toggleAromaTag = (tag: AromaTag) => {
+    touched.current = true;
     setForm((prev) => {
       const nextList = prev.aroma_tags ?? [];
       const exists = nextList.includes(tag);
@@ -233,6 +318,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
     // from what was submitted, not from whatever the form holds by then.
     const savedBeanId = form.bean_id;
     const savedStyle = form.brew_style;
+    const savedSetup = selectedSetup;
     setSaving(true);
     try {
       const payload: BrewDraft = {
@@ -244,7 +330,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
         total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s
       };
       await onSave(payload);
-      startFreshDraft(savedBeanId, savedStyle);
+      startFreshDraft(savedBeanId, savedStyle, savedSetup);
     } finally {
       setSaving(false);
     }
@@ -326,7 +412,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
           <button
             type="button"
             className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
-            onClick={() => startFreshDraft(defaultBeanId, form.brew_style)}
+            onClick={() => startFreshDraft(defaultBeanId, form.brew_style, selectedSetup)}
           >
             Reset
           </button>
@@ -334,8 +420,32 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
       </div>
 
       <form onSubmit={handleSubmit} className="mt-6 grid gap-6">
+        {setups.length > 0 && (
+          <div role="group" aria-label="Brew setups" className="flex flex-wrap gap-2">
+            {setups.map((setup) => {
+              const isSelected = selectedSetup?.id === setup.id;
+              return (
+                <button
+                  key={setup.id}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => handleSetupChip(setup)}
+                  className={`min-h-11 rounded-full border px-4 py-1 text-sm ${
+                    isSelected ? 'border-ember bg-ember/90 text-crema' : 'border-caramel/40 text-espresso'
+                  }`}
+                >
+                  {setupChipLabel(setup)}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="grid gap-4 md:grid-cols-3">
-          <BeanPicker beans={beans} value={form.bean_id} onChange={(value) => update('bean_id', value)} />
+          <BeanPicker
+            beans={beans}
+            value={form.bean_id}
+            onChange={(value) => setForm((prev) => ({ ...prev, bean_id: value }))}
+          />
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Dose (g)</span>
             <input
@@ -479,6 +589,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
                       {grinder}
                     </option>
                   ))}
+                  {extraGrinder && <option value={extraGrinder}>{extraGrinder}</option>}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">

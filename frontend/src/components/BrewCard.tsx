@@ -44,6 +44,12 @@ export function BrewCard({ brew }: Props) {
             {(brew.bean_weight_g && brew.water_weight_g && `${brew.bean_weight_g}g → ${brew.water_weight_g}g`) || ''}
           </p>
           <p className="text-xs text-moss">ratio {brew.ratio ?? '-'}</p>
+          {(brew.setup_name || brew.machine_profile) && (
+            <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-moss/80">
+              {brew.setup_name && <span>{brew.setup_name}</span>}
+              {brew.machine_profile && <span className="italic">Profile: {brew.machine_profile}</span>}
+            </p>
+          )}
         </div>
         <div className="grid w-40 shrink-0 grid-cols-3 overflow-hidden rounded border border-moss/30 text-center">
           <div className="col-span-3 border-b border-moss/30 bg-moss/10 py-1 text-[9px] uppercase tracking-[0.2em] text-moss">

@@ -1,4 +1,4 @@
-import type { BrewDraft } from '../types';
+import type { BrewDraft, BrewSetup } from '../types';
 import { getBrewStylePreset } from './brewStyles';
 
 // Pure draft transitions for the brew log form. State changes to the form are
@@ -66,16 +66,7 @@ export function agitationTotalsFromEvents(events: DraftForm['agitation_events'])
 // A fresh draft. With `advanced`, the style-aware advanced defaults are
 // applied too (the full form shows those fields from the start).
 //
-// Contract for the next bead's applySetup(draft, setup): it is a pure
-// `(draft) => draft` passed to setForm. It must set `brew_style` DIRECTLY, not
-// through applyStyle (applyStyle would reset the yield to ratios[0] and clear
-// bloom/total), then set dose, yield (dose x ratio via roundYield),
-// grinder_name, grind_setting, total_brew_time_s, machine_profile and
-// setup_name - replacing them even when the setup leaves them null - and call
-// withAdvancedDefaults LAST so unset advanced fields get the style's defaults.
-// It leaves agitation_events alone. The component's handler must also set
-// `grinderDecided.current = true`, even when the setup has no grinder, so
-// preference hydration does not refill a grinder the setup left empty.
+// See applySetup for how a saved setup is applied to a draft.
 export function makeDraft(
   options: { beanId?: string; style?: string; grinder?: string; advanced?: boolean } = {}
 ): DraftForm {
@@ -129,6 +120,52 @@ export function applyStyle(draft: DraftForm, style: string, options: { advanced?
   }
   if (preset && typeof draft.bean_weight_g === 'number') {
     next.water_weight_g = roundYield(draft.bean_weight_g * preset.ratios[0]);
+  }
+  return options.advanced ? withAdvancedDefaults(next) : next;
+}
+
+// "Office · Espresso · 1:3": the setup's name plus its ratio, without trailing
+// zeros (3, 2.5, 8).
+export const setupChipLabel = (setup: Pick<BrewSetup, 'name' | 'ratio'>): string =>
+  `${setup.name} · 1:${Number(setup.ratio)}`;
+
+// Applying a saved setup: a pure `(draft) => draft` for setForm, replacing all
+// setup-controlled fields in ONE update. brew_style is set DIRECTLY, not
+// through applyStyle (which would reset the yield to the style's first ratio
+// and clear bloom/total): the yield is the setup's dose x ratio, using the
+// setup's dose or else the draft's current numeric dose (with neither, the
+// yield is left alone). grinder_name, grind_setting, total_brew_time_s,
+// machine_profile and setup_name are replaced even when the setup leaves them
+// null, so nothing from a previous setup lingers. Setups carry no bloom, so
+// bloom is left as is - except an untouched bloom default carried from a
+// timed style into one without (espresso), cleared as applyStyle does so it is
+// not saved on a ~30 s shot. agitation_events are left untouched.
+// withAdvancedDefaults runs LAST in advanced mode, so unset fields get the
+// new style's defaults.
+//
+// The component's handler must also set `grinderDecided.current = true`, even
+// when the setup has no grinder, so preference hydration does not refill a
+// grinder the setup left empty.
+export function applySetup(draft: DraftForm, setup: BrewSetup, options: { advanced?: boolean } = {}): DraftForm {
+  const dose =
+    typeof setup.dose_g === 'number'
+      ? setup.dose_g
+      : typeof draft.bean_weight_g === 'number'
+        ? draft.bean_weight_g
+        : undefined;
+  const next: DraftForm = {
+    ...draft,
+    brew_style: setup.brew_style,
+    grinder_name: setup.grinder_name ?? undefined,
+    grind_setting: setup.grind_setting ?? '',
+    total_brew_time_s: setup.target_time_s ?? undefined,
+    machine_profile: setup.machine_profile ?? undefined,
+    setup_name: setup.name,
+  };
+  if (typeof setup.dose_g === 'number') next.bean_weight_g = setup.dose_g;
+  if (dose !== undefined) next.water_weight_g = roundYield(dose * setup.ratio);
+  if (!hasTimedDefaults(setup.brew_style) && hasTimedDefaults(draft.brew_style)) {
+    if (draft.bloom_time_s === DEFAULT_BLOOM_TIME) next.bloom_time_s = undefined;
   }
   return options.advanced ? withAdvancedDefaults(next) : next;
 }

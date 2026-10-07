@@ -3,7 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QuickLogBar } from '../QuickLogBar';
 import type { DraftForm } from '../../lib/brewDraft';
-import type { Bean, BrewDraft } from '../../types';
+import type { Bean, BrewDraft, BrewSetup } from '../../types';
+import { lastSetupKey } from '../../lib/lastSetup';
+
+const mockSetPreferredGrinder = vi.hoisted(() => vi.fn());
 
 const mockPrefs = vi.hoisted(() => ({
   temperatureUnit: 'celsius' as 'celsius' | 'fahrenheit',
@@ -18,11 +21,13 @@ vi.mock('../../contexts/PreferencesContext', () => ({
       grinders: mockPrefs.grinders,
       preferredGrinder: mockPrefs.preferredGrinder,
     },
-    setPreferredGrinder: vi.fn(),
+    setPreferredGrinder: mockSetPreferredGrinder,
   }),
 }));
 
 beforeEach(() => {
+  localStorage.clear();
+  mockSetPreferredGrinder.mockClear();
   mockPrefs.temperatureUnit = 'celsius';
   mockPrefs.grinders = [];
   mockPrefs.preferredGrinder = undefined;
@@ -559,5 +564,382 @@ describe('QuickLogBar agitation rows', () => {
     expect(screen.getByText('No agitation logged yet.')).toBeInTheDocument();
     fireEvent.click(screen.getByText('+ Add event'));
     expect(totals()).toEqual(['']);
+  });
+});
+
+describe('QuickLogBar setups', () => {
+  const office: BrewSetup = {
+    id: 'office',
+    name: 'Office · Espresso',
+    brew_style: 'espresso',
+    ratio: 3,
+    dose_g: 18,
+    grinder_name: 'DE1 grinder',
+    grind_setting: '14',
+    target_time_s: 36,
+    machine_profile: 'Extractamundo Dos!',
+  };
+  const home: BrewSetup = {
+    id: 'home',
+    name: 'Home · AeroPress',
+    brew_style: 'aeropress',
+    ratio: 8,
+    dose_g: 18,
+    grinder_name: null,
+    grind_setting: null,
+    target_time_s: null,
+    machine_profile: null,
+  };
+  const half: BrewSetup = { ...office, id: 'half', name: 'Half', ratio: 2.5, dose_g: null };
+  const setups = [office, home];
+
+  interface Opts {
+    variant?: 'quick' | 'full';
+    setups?: BrewSetup[];
+    userId?: string;
+    onSave?: (draft: BrewDraft) => void | Promise<void>;
+    initialDraft?: DraftForm;
+  }
+  const ui = (o: Opts) => (
+    <BrowserRouter>
+      <QuickLogBar
+        beans={beans}
+        onSave={o.onSave ?? vi.fn()}
+        defaultBeanId="bean-1"
+        variant={o.variant}
+        initialDraft={o.initialDraft}
+        setups={o.setups}
+        userId={o.userId}
+      />
+    </BrowserRouter>
+  );
+  function renderSetups(o: Opts = {}) {
+    const result = render(ui(o));
+    return { ...result, rerenderWith: (next: Opts) => result.rerender(ui(next)) };
+  }
+  const chip = (name: string) => screen.getByRole('button', { name });
+  const officeChip = () => chip('Office · Espresso · 1:3');
+  const homeChip = () => chip('Home · AeroPress · 1:8');
+
+  it('renders no chip row without setups', () => {
+    renderSetups();
+    expect(screen.queryByRole('group', { name: 'Brew setups' })).not.toBeInTheDocument();
+    renderSetups({ setups: [] });
+    expect(screen.queryByRole('group', { name: 'Brew setups' })).not.toBeInTheDocument();
+  });
+
+  it('labels chips "<name> · 1:<ratio>" without trailing zeros, none pressed initially', () => {
+    renderSetups({ setups: [office, home, half] });
+    expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    expect(homeChip()).toBeInTheDocument();
+    expect(chip('Half · 1:2.5')).toBeInTheDocument();
+  });
+
+  it('tapping an espresso chip on a pour-over form keeps 18 g -> 54 g (not reset to 36)', () => {
+    renderSetups({ setups, userId: 'u1' });
+    expect(styleSelect().value).toBe('pour-over');
+    fireEvent.click(officeChip());
+    expect(styleSelect().value).toBe('espresso');
+    expect(doseInput().value).toBe('18');
+    expect(yieldInput().value).toBe('54');
+    expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('fills grinder, grind setting and target time in the full form, and no bloom default', async () => {
+    const onSave = vi.fn();
+    renderSetups({ variant: 'full', setups, userId: 'u1', onSave });
+    expect(bloomSeconds().value).toBe('45');
+    fireEvent.click(officeChip());
+    expect(grinderSelect().value).toBe('DE1 grinder');
+    expect((screen.getByLabelText('Grind setting') as HTMLInputElement).value).toBe('14');
+    expect(totalMinutes().value).toBe('0');
+    expect(totalSeconds().value).toBe('36');
+    expect(bloomSeconds().value).toBe('');
+    await clickSave('Save brew');
+    const saved = onSave.mock.calls[0][0] as BrewDraft;
+    expect(saved).toMatchObject({
+      setup_name: 'Office · Espresso',
+      machine_profile: 'Extractamundo Dos!',
+      brew_style: 'espresso',
+      bean_weight_g: 18,
+      water_weight_g: 54,
+      total_brew_time_s: 36,
+      grinder_name: 'DE1 grinder',
+    });
+    expect(saved.bloom_time_s).toBeUndefined();
+  });
+
+  it('switching chips applies the other one; the previous setup leaves nothing behind', () => {
+    renderSetups({ variant: 'full', setups, userId: 'u1' });
+    fireEvent.click(officeChip());
+    fireEvent.click(homeChip());
+    expect(styleSelect().value).toBe('aeropress');
+    expect(yieldInput().value).toBe('144');
+    expect(grinderSelect().value).toBe('');
+    expect((screen.getByLabelText('Grind setting') as HTMLInputElement).value).toBe('');
+    expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    expect(homeChip()).toHaveAttribute('aria-pressed', 'true');
+    // pour-over style defaults are filled for the unset advanced fields
+    expect(totalMinutes().value).toBe('3');
+  });
+
+  it('a setup without a dose uses the dose currently on the form', () => {
+    renderSetups({ setups: [half], userId: 'u1' });
+    fireEvent.change(doseInput(), { target: { value: '20' } });
+    fireEvent.click(chip('Half · 1:2.5'));
+    expect(doseInput().value).toBe('20');
+    expect(yieldInput().value).toBe('50');
+  });
+
+  it('clears the grinder when the setup has none, and hydration never refills it', () => {
+    mockPrefs.grinders = ['Comandante'];
+    mockPrefs.preferredGrinder = 'Comandante';
+    const { rerenderWith } = renderSetups({ variant: 'full', setups, userId: 'u1' });
+    expect(grinderSelect().value).toBe('Comandante');
+    fireEvent.click(homeChip());
+    expect(grinderSelect().value).toBe('');
+    mockPrefs.preferredGrinder = 'Niche';
+    mockPrefs.grinders = ['Comandante', 'Niche'];
+    rerenderWith({ variant: 'full', setups, userId: 'u1' });
+    expect(grinderSelect().value).toBe('');
+  });
+
+  it('hydration arriving after the tap does not fill a grinderless setup', () => {
+    const { rerenderWith } = renderSetups({ variant: 'full', setups, userId: 'u1' });
+    expect(grinderSelect().value).toBe('');
+    fireEvent.click(homeChip());
+    mockPrefs.grinders = ['Niche'];
+    mockPrefs.preferredGrinder = 'Niche';
+    rerenderWith({ variant: 'full', setups, userId: 'u1' });
+    expect(grinderSelect().value).toBe('');
+  });
+
+  it('shows a setup grinder that is absent from the preferences list as selected, without writing preferences', () => {
+    mockPrefs.grinders = ['Comandante'];
+    renderSetups({ variant: 'full', setups, userId: 'u1' });
+    fireEvent.click(officeChip());
+    expect(grinderSelect().value).toBe('DE1 grinder');
+    expect(Array.from(grinderSelect().options).map((o) => o.value)).toEqual(['', 'Comandante', 'DE1 grinder']);
+    expect(mockSetPreferredGrinder).not.toHaveBeenCalled();
+  });
+
+  it('shows an initialDraft grinder that is absent from the preferences list as selected', () => {
+    mockPrefs.grinders = ['Comandante'];
+    renderSetups({ variant: 'full', initialDraft: { ...baseDraft, grinder_name: 'Old grinder' } });
+    expect(grinderSelect().value).toBe('Old grinder');
+  });
+
+  it('tapping the selected chip again deselects: values stay, setup_name and machine_profile go', async () => {
+    const onSave = vi.fn();
+    renderSetups({ setups, userId: 'u1', onSave });
+    fireEvent.click(officeChip());
+    fireEvent.click(officeChip());
+    expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    expect(styleSelect().value).toBe('espresso');
+    expect(yieldInput().value).toBe('54');
+    await clickSave('Save quick brew');
+    const saved = onSave.mock.calls[0][0] as BrewDraft;
+    expect(saved.setup_name).toBeUndefined();
+    expect(saved.machine_profile).toBeUndefined();
+    expect(saved).toMatchObject({ brew_style: 'espresso', water_weight_g: 54 });
+  });
+
+  it('editing a field after applying keeps the setup name and the chip', async () => {
+    const onSave = vi.fn();
+    renderSetups({ setups, userId: 'u1', onSave });
+    fireEvent.click(officeChip());
+    fireEvent.change(yieldInput(), { target: { value: '40' } });
+    fireEvent.change(styleSelect(), { target: { value: 'pour-over' } });
+    expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+    await clickSave('Save quick brew');
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ setup_name: 'Office · Espresso', machine_profile: 'Extractamundo Dos!' })
+    );
+  });
+
+  describe('last used', () => {
+    const key = lastSetupKey('u1');
+
+    it('writes the id when a chip is picked and removes it when deselected', () => {
+      renderSetups({ setups, userId: 'u1' });
+      fireEvent.click(officeChip());
+      expect(localStorage.getItem(key)).toBe('office');
+      fireEvent.click(homeChip());
+      expect(localStorage.getItem(key)).toBe('home');
+      fireEvent.click(homeChip());
+      expect(localStorage.getItem(key)).toBeNull();
+    });
+
+    it('does not read or write storage without a user id', () => {
+      localStorage.setItem('coffee-journal-last-setup:undefined', 'office');
+      renderSetups({ setups });
+      expect(styleSelect().value).toBe('pour-over');
+      fireEvent.click(officeChip());
+      expect(localStorage.length).toBe(1);
+    });
+
+    it('auto-applies the remembered setup to a fresh draft once setups have loaded', () => {
+      localStorage.setItem(key, 'office');
+      const { rerenderWith } = renderSetups({ setups: [], userId: 'u1' });
+      expect(styleSelect().value).toBe('pour-over');
+      rerenderWith({ setups, userId: 'u1' });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+      expect(styleSelect().value).toBe('espresso');
+      expect(yieldInput().value).toBe('54');
+    });
+
+    it('an auto-applied grinderless setup is not refilled by preference hydration arriving later', () => {
+      localStorage.setItem(key, 'home');
+      const { rerenderWith } = renderSetups({ variant: 'full', setups: [], userId: 'u1' });
+      rerenderWith({ variant: 'full', setups, userId: 'u1' });
+      expect(homeChip()).toHaveAttribute('aria-pressed', 'true');
+      mockPrefs.grinders = ['Niche'];
+      mockPrefs.preferredGrinder = 'Niche';
+      rerenderWith({ variant: 'full', setups, userId: 'u1' });
+      expect(grinderSelect().value).toBe('');
+    });
+
+    it('auto-applies on first render when setups are already there', () => {
+      localStorage.setItem(key, 'home');
+      renderSetups({ setups, userId: 'u1' });
+      expect(homeChip()).toHaveAttribute('aria-pressed', 'true');
+      expect(yieldInput().value).toBe('144');
+    });
+
+    it('is scoped per user: user B does not get user A\'s setup', () => {
+      localStorage.setItem(key, 'office');
+      renderSetups({ setups, userId: 'u2' });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+      expect(styleSelect().value).toBe('pour-over');
+    });
+
+    it('ignores a remembered id that no longer exists, silently', () => {
+      localStorage.setItem(key, 'deleted-setup');
+      renderSetups({ setups, userId: 'u1' });
+      expect(styleSelect().value).toBe('pour-over');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+      expect(homeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('a late setups response does not overwrite what the user already edited', () => {
+      localStorage.setItem(key, 'office');
+      const { rerenderWith } = renderSetups({ setups: [], userId: 'u1' });
+      fireEvent.change(doseInput(), { target: { value: '20' } });
+      rerenderWith({ setups, userId: 'u1' });
+      expect(styleSelect().value).toBe('pour-over');
+      expect(doseInput().value).toBe('20');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('a late setups response does not re-apply over a chip the user already picked or deselected', () => {
+      localStorage.setItem(key, 'office');
+      const { rerenderWith } = renderSetups({ setups: [home], userId: 'u1' });
+      // setups arrived without the remembered one; user picks Home, then more arrive
+      fireEvent.click(homeChip());
+      rerenderWith({ setups, userId: 'u1' });
+      expect(homeChip()).toHaveAttribute('aria-pressed', 'true');
+      expect(styleSelect().value).toBe('aeropress');
+    });
+
+    it('applies at most once per fresh draft: a later setups update does not re-apply', () => {
+      localStorage.setItem(key, 'office');
+      const { rerenderWith } = renderSetups({ setups, userId: 'u1' });
+      fireEvent.click(officeChip()); // deselect
+      expect(styleSelect().value).toBe('espresso');
+      fireEvent.change(styleSelect(), { target: { value: 'aeropress' } });
+      rerenderWith({ setups: [...setups], userId: 'u1' });
+      expect(styleSelect().value).toBe('aeropress');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('initialDraft beats last-used', () => {
+      localStorage.setItem(key, 'office');
+      renderSetups({
+        setups,
+        userId: 'u1',
+        initialDraft: { ...baseDraft, brew_style: 'pour-over', water_weight_g: 288 },
+      });
+      expect(styleSelect().value).toBe('pour-over');
+      expect(yieldInput().value).toBe('288');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('shows the chip matching initialDraft.setup_name (case-insensitive) selected without re-applying it', () => {
+      renderSetups({
+        setups,
+        userId: 'u1',
+        initialDraft: {
+          ...baseDraft,
+          brew_style: 'espresso',
+          bean_weight_g: 18,
+          water_weight_g: 40,
+          setup_name: 'office · espresso',
+          machine_profile: 'Custom',
+        },
+      });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+      expect(yieldInput().value).toBe('40');
+    });
+
+    it('an initialDraft setup_name with no matching setup selects nothing', () => {
+      renderSetups({ setups, userId: 'u1', initialDraft: { ...baseDraft, setup_name: 'Gone' } });
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+      expect(homeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+  });
+
+  describe('Reset and save', () => {
+    it('Reset re-applies the selected setup, not the previous style defaults', () => {
+      renderSetups({ setups, userId: 'u1' });
+      fireEvent.click(officeChip());
+      fireEvent.change(yieldInput(), { target: { value: '30' } });
+      fireEvent.click(screen.getByText('Reset'));
+      expect(styleSelect().value).toBe('espresso');
+      expect(doseInput().value).toBe('18');
+      expect(yieldInput().value).toBe('54');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('Reset with a grinderless setup does not refill the preferred grinder', () => {
+      mockPrefs.grinders = ['Comandante'];
+      mockPrefs.preferredGrinder = 'Comandante';
+      renderSetups({ variant: 'full', setups, userId: 'u1' });
+      fireEvent.click(homeChip());
+      fireEvent.click(screen.getByText('Reset'));
+      expect(grinderSelect().value).toBe('');
+    });
+
+    it('Reset with no selected setup uses style defaults', () => {
+      renderSetups({ setups, userId: 'u1' });
+      fireEvent.click(officeChip());
+      fireEvent.click(officeChip()); // deselect
+      fireEvent.click(screen.getByText('Reset'));
+      expect(styleSelect().value).toBe('espresso');
+      expect(yieldInput().value).toBe('36');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('after a save the next draft re-applies the selected setup', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      renderSetups({ variant: 'full', setups, userId: 'u1', onSave });
+      fireEvent.click(officeChip());
+      fireEvent.change(doseInput(), { target: { value: '20' } });
+      await clickSave('Save brew');
+      await waitFor(() => expect(doseInput().value).toBe('18'));
+      expect(yieldInput().value).toBe('54');
+      expect(styleSelect().value).toBe('espresso');
+      expect(totalSeconds().value).toBe('36');
+      expect(officeChip()).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('the saved payload and the next draft stay separate', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      renderSetups({ setups, userId: 'u1', onSave });
+      fireEvent.click(homeChip());
+      await clickSave('Save quick brew');
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ setup_name: 'Home · AeroPress', brew_style: 'aeropress', water_weight_g: 144 })
+      );
+    });
   });
 });

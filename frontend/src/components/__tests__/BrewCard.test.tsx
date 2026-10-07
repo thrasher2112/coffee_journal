@@ -35,6 +35,28 @@ describe('BrewCard', () => {
     expect(screen.queryByText('Pour over')).not.toBeInTheDocument();
   });
 
+  it('shows the setup name and machine profile when present', () => {
+    render(<BrewCard brew={{ ...baseBrew, setup_name: 'Office · Espresso', machine_profile: 'Extractamundo Dos!' }} />);
+    expect(screen.getByText('Office · Espresso')).toBeInTheDocument();
+    expect(screen.getByText('Profile: Extractamundo Dos!')).toBeInTheDocument();
+  });
+
+  it('shows just the setup name when there is no profile, and the reverse', () => {
+    const { rerender } = render(<BrewCard brew={{ ...baseBrew, setup_name: 'Home · AeroPress' }} />);
+    expect(screen.getByText('Home · AeroPress')).toBeInTheDocument();
+    expect(screen.queryByText(/Profile:/)).not.toBeInTheDocument();
+    rerender(<BrewCard brew={{ ...baseBrew, machine_profile: 'Blooming espresso' }} />);
+    expect(screen.getByText('Profile: Blooming espresso')).toBeInTheDocument();
+    expect(screen.queryByText('Home · AeroPress')).not.toBeInTheDocument();
+  });
+
+  it('adds nothing for provenance when absent or null', () => {
+    const { container } = render(<BrewCard brew={{ ...baseBrew, setup_name: null, machine_profile: null }} />);
+    expect(screen.queryByText(/Profile:/)).not.toBeInTheDocument();
+    const plain = render(<BrewCard brew={baseBrew} />);
+    expect(container.innerHTML).toBe(plain.container.innerHTML);
+  });
+
   it('shows brew time and bloom time as minutes:seconds', () => {
     render(<BrewCard brew={{ ...baseBrew, total_brew_time_s: 185, bloom_time_s: 45 }} />);
     fireEvent.click(screen.getByText('Show details'));

@@ -4,6 +4,8 @@ import { Line, Bar } from 'react-chartjs-2';
 import { QuickLogBar } from '../components/QuickLogBar';
 import { BrewCard } from '../components/BrewCard';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
+import { useSetups } from '../hooks/useSetups';
+import { useAuth } from '../contexts/AuthContext';
 import type { Bean, Brew, MetricsOverview, BrewDraft } from '../types';
 import { createBrew, fetchBeans, fetchBrews, fetchMetrics, NetworkError } from '../lib/api';
 import { SAMPLE_BEANS, SAMPLE_BREWS, SAMPLE_METRICS } from '../lib/sampleData';
@@ -16,6 +18,10 @@ export function HomePage() {
   const [metrics, setMetrics] = useState<MetricsOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { brews: localBrews, addBrew, unsynced } = useLocalBrewStore();
+  // Setups are online-only and independent of the beans/brews load: if that
+  // request fails there are simply no chips, and nothing else changes.
+  const setups = useSetups();
+  const { user } = useAuth();
 
   const load = async () => {
     try {
@@ -68,6 +74,8 @@ export function HomePage() {
       water_weight_g: brew.water_weight_g,
       date: brew.date,
       grind_setting: brew.grind_setting,
+      setup_name: brew.setup_name,
+      machine_profile: brew.machine_profile,
       grind_setting_notes: brew.grind_setting_notes,
       water_temp_c: brew.water_temp_c,
       bloom_time_s: brew.bloom_time_s,
@@ -124,7 +132,13 @@ export function HomePage() {
   return (
     <div className="space-y-8">
       {error && <div className="rounded-2xl border border-ember/50 bg-ember/20 p-3 text-sm text-crema">{error}</div>}
-      <QuickLogBar beans={beans} onSave={handleSave} defaultBeanId={beans[0]?.id} />
+      <QuickLogBar
+        beans={beans}
+        onSave={handleSave}
+        defaultBeanId={beans[0]?.id}
+        setups={setups}
+        userId={user?.id}
+      />
 
       <section className="grid gap-6 md:grid-cols-2">
         <article className="journal-card p-6">

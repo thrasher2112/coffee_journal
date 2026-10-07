@@ -4,6 +4,8 @@ import { QuickLogBar } from '../components/QuickLogBar';
 import type { DraftForm } from '../lib/brewDraft';
 import type { Bean } from '../types';
 import { createBrew, fetchBeans } from '../lib/api';
+import { useSetups } from '../hooks/useSetups';
+import { useAuth } from '../contexts/AuthContext';
 
 export function BrewFormPage() {
   const [beans, setBeans] = useState<Bean[]>([]);
@@ -12,6 +14,9 @@ export function BrewFormPage() {
   // direct visit to this page (no navigation state) just starts blank.
   const location = useLocation();
   const initialDraft = (location.state as { draft?: DraftForm } | null)?.draft;
+  // Independent of beans: a setups failure just means no chips.
+  const setups = useSetups();
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchBeans().then(setBeans).catch(() => setBeans([]));
@@ -29,6 +34,8 @@ export function BrewFormPage() {
         beans={beans}
         variant="full"
         initialDraft={initialDraft}
+        setups={setups}
+        userId={user?.id}
         onSave={async (draft) => {
           await createBrew(draft);
         }}
