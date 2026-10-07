@@ -103,7 +103,12 @@ def test_import_of_another_users_export_does_not_collide(
     client_b = make_client(second_user)
     resp = client_b.post("/api/import", json=export)
     assert resp.status_code == 202, resp.text
-    assert resp.json()["counts"] == {"beans": 1, "brews": 1}
+    assert resp.json()["counts"] == {
+        "beans": 1,
+        "brews": 1,
+        "setups": 0,
+        "setups_skipped": 0,
+    }
 
     beans_b = client_b.get("/api/beans/").json()["items"]
     brews_b = client_b.get("/api/brews/").json()["items"]
@@ -288,3 +293,283 @@ def test_import_updates_existing_brew_snapshot(auth_client):
     )
     assert resp.status_code == 202
     assert auth_client.get(f"/api/brews/{brew['id']}").json()["setup_name"] == "Imported"
+
+
+# --- setups in backup / restore ---------------------------------------------
+
+
+def _setup(client, name="Office", **extra):
+    resp = client.post(
+        "/api/setups",
+        json={"name": name, "brew_style": "espresso", "ratio": 2, **extra},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _setups(client):
+    return client.get("/api/setups").json()
+
+
+def test_export_contains_setups(auth_client):
+    created = _setup(auth_client, dose_g=18, machine_profile="Flat 6 bar")
+
+    data = auth_client.get("/api/export").json()
+
+    assert len(data["setups"]) == 1
+    exported = data["setups"][0]
+    assert exported["id"] == created["id"]
+    assert exported["name"] == "Office"
+    assert exported["dose_g"] == 18
+    assert exported["machine_profile"] == "Flat 6 bar"
+    assert "user_id" not in exported
+
+
+def test_export_setups_are_only_the_users_own(make_client, test_user, second_user):
+    _setup(make_client(test_user), "Mine")
+    _setup(make_client(second_user), "Theirs")
+
+    data = make_client(test_user).get("/api/export").json()
+
+    assert [s["name"] for s in data["setups"]] == ["Mine"]
+
+
+def test_export_empty_has_no_setups(auth_client):
+    assert auth_client.get("/api/export").json()["setups"] == []
+
+
+def test_import_creates_setups_in_a_fresh_account(make_client, test_user, second_user):
+    client_a = make_client(test_user)
+    _setup(client_a, "Office", dose_g=18, target_time_s=30, grinder_name="Niche")
+    _setup(client_a, "Home", brew_style="pour-over", ratio=16)
+    export = client_a.get("/api/export").json()
+
+    client_b = make_client(second_user)
+    resp = client_b.post("/api/import", json=export)
+
+    assert resp.status_code == 202, resp.text
+    counts = resp.json()["counts"]
+    assert counts["setups"] == 2
+    assert counts["setups_skipped"] == 0
+    restored = {s["name"]: s for s in _setups(client_b)}
+    assert set(restored) == {"Office", "Home"}
+    assert restored["Office"]["dose_g"] == 18
+    assert restored["Office"]["target_time_s"] == 30
+    assert restored["Office"]["grinder_name"] == "Niche"
+    assert restored["Home"]["brew_style"] == "pour-over"
+    assert restored["Home"]["ratio"] == 16
+
+
+def test_import_setup_with_other_users_id_gets_a_new_id(
+    make_client, test_user, second_user
+):
+    client_a = make_client(test_user)
+    original = _setup(client_a, "Office")
+    export = client_a.get("/api/export").json()
+
+    client_b = make_client(second_user)
+    resp = client_b.post("/api/import", json=export)
+
+    assert resp.status_code == 202, resp.text
+    (restored,) = _setups(client_b)
+    assert restored["id"] != original["id"]
+    # The original owner is untouched. (dependency_overrides is global, so
+    # re-select user A rather than reusing the earlier client.)
+    assert _setups(make_client(test_user))[0]["id"] == original["id"]
+
+
+def test_import_into_a_fresh_database_keeps_setup_ids(auth_client, db_session):
+    from sqlalchemy import delete
+
+    from coffee_journal.models import BrewSetup
+
+    original = _setup(auth_client, "Office")
+    export = auth_client.get("/api/export").json()
+    db_session.execute(delete(BrewSetup))
+    db_session.commit()
+
+    resp = auth_client.post("/api/import", json=export)
+
+    assert resp.status_code == 202
+    assert [s["id"] for s in _setups(auth_client)] == [original["id"]]
+
+
+def test_reimporting_own_export_skips_existing_setups(auth_client):
+    _setup(auth_client, "Office")
+    export = auth_client.get("/api/export").json()
+
+    resp = auth_client.post("/api/import", json=export)
+
+    assert resp.status_code == 202, resp.text
+    counts = resp.json()["counts"]
+    assert counts["setups"] == 0
+    assert counts["setups_skipped"] == 1
+    assert len(_setups(auth_client)) == 1
+
+
+def test_import_same_name_different_case_skips_and_leaves_existing_untouched(
+    auth_client,
+):
+    existing = _setup(auth_client, "Office", ratio=3, dose_g=18)
+
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {
+                    "name": "  OFFICE ",
+                    "brew_style": "pour-over",
+                    "ratio": 16,
+                    "dose_g": 30,
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 202, resp.text
+    counts = resp.json()["counts"]
+    assert counts["setups"] == 0
+    assert counts["setups_skipped"] == 1
+    (after,) = _setups(auth_client)
+    assert after == existing
+
+
+def test_import_intra_payload_duplicate_names_create_one_skip_one(auth_client):
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {"name": "Office", "brew_style": "espresso", "ratio": 2},
+                {"name": "office ", "brew_style": "pour-over", "ratio": 16},
+            ]
+        },
+    )
+
+    assert resp.status_code == 202, resp.text
+    counts = resp.json()["counts"]
+    assert counts["setups"] == 1
+    assert counts["setups_skipped"] == 1
+    (only,) = _setups(auth_client)
+    # First one wins.
+    assert only["brew_style"] == "espresso"
+
+
+def test_import_without_setups_key_still_works(auth_client):
+    """A version-1 backup has no setups at all."""
+    resp = auth_client.post(
+        "/api/import", json={"beans": [{"name": "Old Bean"}], "brews": []}
+    )
+
+    assert resp.status_code == 202
+    assert resp.json()["counts"] == {
+        "beans": 1,
+        "brews": 0,
+        "setups": 0,
+        "setups_skipped": 0,
+    }
+    assert _setups(auth_client) == []
+
+
+def test_import_invalid_setup_is_422_before_any_write(auth_client):
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "beans": [{"name": "Should Not Land"}],
+            "setups": [
+                {"name": "Fine", "brew_style": "espresso", "ratio": 2},
+                {"name": "Bad", "brew_style": "not-a-style", "ratio": 2},
+            ],
+        },
+    )
+
+    assert resp.status_code == 422
+    assert auth_client.get("/api/beans/").json()["total"] == 0
+    assert _setups(auth_client) == []
+
+
+def test_import_setup_with_blank_name_or_oversized_id_is_422(auth_client):
+    blank = auth_client.post(
+        "/api/import",
+        json={"setups": [{"name": "  ", "brew_style": "espresso", "ratio": 2}]},
+    )
+    long_id = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {"id": "x" * 37, "name": "A", "brew_style": "espresso", "ratio": 2}
+            ]
+        },
+    )
+    assert blank.status_code == 422
+    assert long_id.status_code == 422
+
+
+def test_import_maps_duplicate_name_integrity_error_to_skipped(
+    auth_client, monkeypatch
+):
+    """If the DB index trips after the pre-check (a concurrent writer), skip."""
+    from coffee_journal import crud
+
+    def boom(db, data):
+        raise crud.setup.DuplicateSetupName
+
+    monkeypatch.setattr(crud.setup, "create_setup", boom)
+
+    resp = auth_client.post(
+        "/api/import",
+        json={"setups": [{"name": "Office", "brew_style": "espresso", "ratio": 2}]},
+    )
+
+    assert resp.status_code == 202
+    counts = resp.json()["counts"]
+    assert counts["setups"] == 0
+    assert counts["setups_skipped"] == 1
+
+
+def test_import_setup_keeps_own_id_when_free_and_ignores_timestamps(auth_client):
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "setups": [
+                {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "name": "Office",
+                    "brew_style": "espresso",
+                    "ratio": 2,
+                    "created_at": "2001-01-01T00:00:00Z",
+                    "updated_at": "2001-01-01T00:00:00Z",
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 202, resp.text
+    (restored,) = _setups(auth_client)
+    assert restored["id"] == "11111111-1111-1111-1111-111111111111"
+    assert not restored["created_at"].startswith("2001")
+
+
+def test_full_backup_round_trip_includes_setups_and_brew_snapshots(
+    make_client, test_user, second_user
+):
+    client_a = make_client(test_user)
+    bean = client_a.post("/api/beans/", json={"name": "Bean"}).json()
+    _setup(client_a, "Office", machine_profile="Flat")
+    client_a.post(
+        "/api/brews/",
+        json={
+            "date": date.today().isoformat(),
+            "bean_id": bean["id"],
+            "bean_weight_g": 18,
+            "water_weight_g": 36,
+            "setup_name": "Office",
+            "machine_profile": "Flat",
+        },
+    )
+    export = client_a.get("/api/export").json()
+
+    client_b = make_client(second_user)
+    assert client_b.post("/api/import", json=export).status_code == 202
+
+    assert [s["name"] for s in _setups(client_b)] == ["Office"]
+    assert client_b.get("/api/brews/").json()["items"][0]["setup_name"] == "Office"

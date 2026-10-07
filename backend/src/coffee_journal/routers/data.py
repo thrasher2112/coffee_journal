@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from .. import crud
 from ..auth import get_current_user
 from ..db import get_db
-from ..models import Bean, Brew
+from ..models import Bean, Brew, BrewSetup
 from ..models.user import User
 from ..rate_limit import limiter
 from ..schemas.bean import BeanRead
 from ..schemas.brew import BrewRead, ExportPayload, ImportPayload
+from ..schemas.setup import SetupRead
 from ..schemas.user import PreferencesRead
 
 router = APIRouter()
@@ -55,6 +56,10 @@ def export_data(
         "beans": bean_payload,
         "brews": brew_payload,
         "preferences": PreferencesRead.model_validate(current_user),
+        "setups": [
+            SetupRead.model_validate(setup)
+            for setup in crud.setup.list_setups(db, current_user.id)
+        ],
     }
 
 
@@ -66,7 +71,7 @@ def import_data(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    imported = {"beans": 0, "brews": 0}
+    imported = {"beans": 0, "brews": 0, "setups": 0, "setups_skipped": 0}
 
     # Restore preferences first: they are independent of the rows below, so a
     # later failure there still leaves them applied.
@@ -145,4 +150,36 @@ def import_data(
                 data.pop("id", None)
             crud.brew.create_brew(db, data)
         imported["brews"] += 1
+
+    # Setups go last so a failure above (e.g. a brew whose bean is missing)
+    # does not leave them half-applied. They never touch beans or brews: brews
+    # carry only a plain-text snapshot of their setup, so nothing to remap.
+    #
+    # Restore never merges or overwrites: a setup whose name (trimmed,
+    # case-insensitive) is already in use - on the account, or earlier in this
+    # same file - is skipped and the existing one is left exactly as it is.
+    seen_setup_names: set[str] = set()
+    for setup in payload.setups:
+        key = setup.name.lower()
+        if key in seen_setup_names:
+            imported["setups_skipped"] += 1
+            continue
+        seen_setup_names.add(key)
+
+        data = setup.model_dump(exclude_unset=True)
+        incoming_id = data.get("id")
+        data["user_id"] = current_user.id
+        # Same keep-the-id-if-free rule as beans and brews. An id held by
+        # another account's setup (or by one of ours under a different name)
+        # would violate the primary key, so it gets a fresh one instead.
+        if _id_taken(db, BrewSetup, incoming_id):
+            data.pop("id", None)
+        try:
+            crud.setup.create_setup(db, data)
+        except crud.setup.DuplicateSetupName:
+            # create_setup pre-checks the name; this also covers a concurrent
+            # writer (or a lower() the DB folds differently from Python).
+            imported["setups_skipped"] += 1
+            continue
+        imported["setups"] += 1
     return {"status": "imported", "counts": imported}

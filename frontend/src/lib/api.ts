@@ -179,14 +179,27 @@ export interface ServerExport {
   beans: Bean[];
   brews: Brew[];
   preferences: ServerPreferences | null;
+  // Absent when talking to a server that predates brew setups.
+  setups?: unknown[];
+}
+
+/** What the server did with a restore. Setup counts are absent on older servers. */
+export interface ImportResult {
+  status: string;
+  counts: {
+    beans: number;
+    brews: number;
+    setups?: number;
+    setups_skipped?: number;
+  };
 }
 
 export async function exportData(): Promise<ServerExport> {
   return request<ServerExport>(`/api/export`);
 }
 
-export async function importData(payload: unknown) {
-  return request(`/api/import`, {
+export async function importData(payload: unknown): Promise<ImportResult> {
+  return request<ImportResult>(`/api/import`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
