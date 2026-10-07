@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { HomePage } from '../Home';
 import { BrewFormPage } from '../BrewForm';
@@ -99,5 +99,32 @@ describe('HomePage setups', () => {
     expect((screen.getByLabelText('Style') as HTMLSelectElement).value).toBe('espresso');
     expect((screen.getByLabelText('Yield (g)') as HTMLInputElement).value).toBe('54');
     expect(screen.getByText('Advanced mode')).toBeInTheDocument();
+  });
+
+  it('carries a prefilled grind to the full form with its hint, and a bean change there re-looks-up', async () => {
+    const withGrinder = { ...office, grinder_name: 'Niche' };
+    api.fetchSetups.mockResolvedValue([withGrinder]);
+    api.fetchBeans.mockResolvedValue([bean, { ...bean, id: 'bean-2', name: 'Kenya' }]);
+    api.fetchLastGrind.mockImplementation(async (beanId: string) =>
+      beanId === 'bean-1'
+        ? { grind_setting: '14', date: '2026-10-03' }
+        : { grind_setting: '9', date: '2026-10-04' }
+    );
+    renderHome();
+    fireEvent.click(await screen.findByRole('button', { name: 'Office · Espresso · 1:3' }));
+    await waitFor(() => expect(api.fetchLastGrind).toHaveBeenCalledWith('bean-1', 'Niche'));
+    await act(async () => {});
+    api.fetchLastGrind.mockClear();
+
+    fireEvent.click(screen.getByText('Full Brew Log'));
+    const grind = (await screen.findByLabelText('Grind setting')) as HTMLInputElement;
+    expect(grind.value).toBe('14');
+    expect(screen.getByText(/^from your .* brew$/)).toBeInTheDocument();
+    // Seeded from the quick form: no blank flicker, no second lookup.
+    expect(api.fetchLastGrind).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Bean'), { target: { value: 'bean-2' } });
+    await waitFor(() => expect(grind.value).toBe('9'));
+    expect(api.fetchLastGrind).toHaveBeenCalledWith('bean-2', 'Niche');
   });
 });

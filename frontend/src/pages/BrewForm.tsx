@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { QuickLogBar } from '../components/QuickLogBar';
+import { QuickLogBar, type GrindPrefillInfo } from '../components/QuickLogBar';
 import type { DraftForm } from '../lib/brewDraft';
 import type { Bean } from '../types';
 import { createBrew, fetchBeans } from '../lib/api';
@@ -13,7 +13,8 @@ export function BrewFormPage() {
   // typed in there, so switching to the full form doesn't lose it. A
   // direct visit to this page (no navigation state) just starts blank.
   const location = useLocation();
-  const initialDraft = (location.state as { draft?: DraftForm } | null)?.draft;
+  const navState = location.state as { draft?: DraftForm; grindPrefill?: GrindPrefillInfo } | null;
+  const initialDraft = navState?.draft;
   // Independent of beans: a setups failure just means no chips.
   const setups = useSetups();
   const { user } = useAuth();
@@ -34,6 +35,7 @@ export function BrewFormPage() {
         beans={beans}
         variant="full"
         initialDraft={initialDraft}
+        initialGrindPrefill={navState?.grindPrefill}
         setups={setups}
         userId={user?.id}
         onSave={async (draft) => {

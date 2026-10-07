@@ -64,12 +64,14 @@ def last_grind(
             Brew.user_id == user_id,
             Brew.bean_id == bean_id,
             func.lower(func.trim(Brew.grinder_name)) == wanted,
-            func.trim(Brew.grind_setting) != "",
+            Brew.grind_setting.is_not(None),
         )
         .order_by(Brew.date.desc(), Brew.created_at.desc())
-        .limit(1)
     )
-    return db.scalars(stmt).first()
+    # Blankness is decided here, not in SQL: SQL trim() strips spaces only, so a
+    # grind of "\t" would pass it, win the ordering, and hide an older brew that
+    # did record a grind. One bean on one grinder is a short list.
+    return next((b for b in db.scalars(stmt) if b.grind_setting.strip()), None)
 
 
 def get_brew(db: Session, brew_id: str, user_id: str) -> Brew | None:

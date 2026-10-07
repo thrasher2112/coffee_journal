@@ -146,7 +146,10 @@ explicit transitions:
   and looked up again; no result leaves it empty. Offline or failing: silently
   no prefill, the form never waits. The grind input (and so the hint) is an
   advanced-form field; the quick form prefills the value invisibly, like the
-  preferred grinder.
+  preferred grinder. Navigating quick -> full
+  passes the prefill (value + date) in the router state next to the draft, so the
+  full form keeps the hint and still treats the grind as a suggestion, with no
+  refetch. The hint adds the year when the brew is not from the current year.
 - *Incoming draft* (edit/navigate with `initialDraft`) wins over last-used
   defaults.
 - *Preference hydration* must not refill a grinder the setup intentionally left

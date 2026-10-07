@@ -45,6 +45,11 @@ interface Props {
   // Scopes the remembered last-used setup. Without it that is neither read
   // nor written.
   userId?: string;
+  // The grind the quick form had prefilled (value + brew date), carried across
+  // the quick -> full navigation next to initialDraft. Honoured only while the
+  // draft's grind still equals it, so the full form keeps the hint and keeps
+  // treating that grind as a suggestion (not a user decision) with no refetch.
+  initialGrindPrefill?: GrindPrefillInfo;
 }
 
 const NO_SETUPS: BrewSetup[] = [];
@@ -59,19 +64,34 @@ const findSetupByName = (setups: BrewSetup[], name: string | null | undefined) =
 // (the API matches the same way).
 const normalizeGrinder = (name: string | undefined): string => (name ?? '').trim().toLowerCase();
 
-// "3 Oct" from the API's YYYY-MM-DD, built in local time so the day never
-// shifts with the timezone. Anything unparseable falls back to the raw string.
+// "3 Oct" from the API's YYYY-MM-DD ("3 Oct 2025" when not this year), built in
+// local time so the day never shifts with the timezone. Anything unparseable
+// falls back to the raw string.
 const formatBrewDate = (iso: string): string => {
   const [year, month, day] = iso.split('-').map(Number);
   const date = new Date(year, month - 1, day);
   if (!year || !month || !day || Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const sameYear = year === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, {
+    ...(sameYear ? {} : { year: 'numeric' }),
+    month: 'short',
+    day: 'numeric',
+  });
 };
 
-interface GrindPrefill {
+/** A prefilled grind and the date of the brew it came from. */
+export interface GrindPrefillInfo {
   grind: string;
   date: string;
 }
+
+// Internally also remembers which bean + grinder it answered for.
+interface GrindPrefill extends GrindPrefillInfo {
+  key: string;
+}
+
+const lookupKeyOf = (beanId: string | undefined, grinder: string | undefined) =>
+  `${beanId ?? ''}|${normalizeGrinder(grinder)}`;
 
 const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
   if (celsius === '' || celsius === undefined) return '';
@@ -87,6 +107,7 @@ export function QuickLogBar({
   initialDraft,
   setups = NO_SETUPS,
   userId,
+  initialGrindPrefill,
 }: Props) {
   const { preferences, setPreferredGrinder } = usePreferences();
   const [isAdvanced, setIsAdvanced] = useState(variant === 'full');
@@ -136,9 +157,17 @@ export function QuickLogBar({
   // exactly while the grind in the form is a prefilled one, and the ref mirrors
   // it for the effect, which must not depend on it. `draftNonce` re-runs the
   // lookup for a fresh draft whose bean and grinder did not change.
-  const grindDecided = useRef(!!initialDraft?.grind_setting?.trim());
-  const [prefill, setPrefillState] = useState<GrindPrefill | null>(null);
-  const prefillRef = useRef<GrindPrefill | null>(null);
+  // A carried prefill only counts while the draft's grind is still that value;
+  // any other non-empty draft grind is the incoming draft's own, i.e. decided.
+  const seededPrefill: GrindPrefill | null =
+    initialDraft?.grind_setting?.trim() &&
+    initialGrindPrefill &&
+    initialGrindPrefill.grind === initialDraft.grind_setting
+      ? { ...initialGrindPrefill, key: lookupKeyOf(initialDraft.bean_id, initialDraft.grinder_name) }
+      : null;
+  const grindDecided = useRef(!!initialDraft?.grind_setting?.trim() && !seededPrefill);
+  const [prefill, setPrefillState] = useState<GrindPrefill | null>(seededPrefill);
+  const prefillRef = useRef<GrindPrefill | null>(seededPrefill);
   const setPrefill = (next: GrindPrefill | null) => {
     prefillRef.current = next;
     setPrefillState(next);
@@ -190,6 +219,9 @@ export function QuickLogBar({
   const lookupKey = normalizeGrinder(form.grinder_name);
   useEffect(() => {
     if (grindDecided.current) return;
+    // A prefill carried in from the quick form already answers for this very
+    // bean and grinder: keep it, no refetch.
+    if (prefillRef.current?.key === lookupKeyOf(lookupBeanId, lookupKey)) return;
     // The bean or grinder moved on from what an earlier lookup filled in: that
     // grind belongs to the old pair, so drop it (and its hint) now. A new
     // lookup below may put a new one in; a failed or empty one leaves it blank.
@@ -208,6 +240,9 @@ export function QuickLogBar({
       .then((result) => {
         const grind = result?.grind_setting?.trim();
         if (cancelled || grindDecided.current || !result || !grind) return;
+        // Belt and braces: the `cancelled` flag already covers a changed key;
+        // this re-checks the live form in case a path changes it without
+        // re-running the effect.
         const latest = formRef.current;
         if (
           latest.bean_id !== lookupBeanId ||
@@ -219,7 +254,7 @@ export function QuickLogBar({
         // Raw setForm, not update(): a prefill is not a user edit, so it must
         // not block the last-used setup auto-apply.
         setForm((prev) => ({ ...prev, grind_setting: grind }));
-        setPrefill({ grind, date: result.date });
+        setPrefill({ grind, date: result.date, key: lookupKeyOf(lookupBeanId, lookupKey) });
       })
       // Offline or failing: no suggestion. The form never waits on this.
       .catch(() => {});
@@ -551,7 +586,10 @@ export function QuickLogBar({
           ) : (
             <Link
               to="/brew"
-              state={{ draft: form }}
+              state={{
+                draft: form,
+                grindPrefill: prefill ? { grind: prefill.grind, date: prefill.date } : undefined,
+              }}
               className="inline-flex min-h-11 items-center justify-center min-h-11 text-xs uppercase tracking-[0.3em] text-caramel"
             >
               Full Brew Log

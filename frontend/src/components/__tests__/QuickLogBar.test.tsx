@@ -1443,6 +1443,84 @@ describe('QuickLogBar grind prefill', () => {
     await waitFor(() => expect(grinderSelect().value).toBe('Comandante'));
   });
 
+  it('adds the year to the hint when the brew is not from this year', async () => {
+    const year = new Date().getFullYear();
+    api.fetchLastGrind.mockResolvedValue(found('14', `${year - 1}-10-03`));
+    renderPrefill();
+    await waitFor(() => expect(grindInput().value).toBe('14'));
+    const old = new Date(year - 1, 9, 3).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    expect(screen.getByText(`from your ${old} brew`)).toBeInTheDocument();
+  });
+
+  it('omits the year for a brew from this year', async () => {
+    const year = new Date().getFullYear();
+    api.fetchLastGrind.mockResolvedValue(found('14', `${year}-01-05`));
+    renderPrefill();
+    await waitFor(() => expect(grindInput().value).toBe('14'));
+    const text = new Date(year, 0, 5).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    expect(screen.getByText(`from your ${text} brew`)).toBeInTheDocument();
+  });
+
+  describe('initialGrindPrefill (quick -> full navigation)', () => {
+    const seeded = { grind: '20', date: '2026-10-03' };
+    const draft = { ...baseDraft, grinder_name: 'Niche', grind_setting: '20' };
+    const renderSeeded = (initialGrindPrefill: { grind: string; date: string } | undefined, d = draft) =>
+      render(
+        <BrowserRouter>
+          <QuickLogBar
+            beans={beans2}
+            onSave={vi.fn()}
+            defaultBeanId="bean-1"
+            variant="full"
+            initialDraft={d}
+            initialGrindPrefill={initialGrindPrefill}
+            userId="u1"
+          />
+        </BrowserRouter>
+      );
+
+    it('shows the hint at once, without another lookup', async () => {
+      renderSeeded(seeded);
+      expect(grindInput().value).toBe('20');
+      expect(hint()).toBeInTheDocument();
+      await act(async () => {});
+      expect(api.fetchLastGrind).not.toHaveBeenCalled();
+    });
+
+    it('a bean change re-looks-up the carried grind, and clears it when there is none', async () => {
+      api.fetchLastGrind.mockResolvedValueOnce(found('9')).mockResolvedValueOnce(null);
+      renderSeeded(seeded);
+      fireEvent.change(beanSelect(), { target: { value: 'bean-2' } });
+      await waitFor(() => expect(grindInput().value).toBe('9'));
+      fireEvent.change(beanSelect(), { target: { value: 'bean-3' } });
+      await waitFor(() => expect(grindInput().value).toBe(''));
+      expect(hint()).not.toBeInTheDocument();
+    });
+
+    it('typing still decides it', async () => {
+      renderSeeded(seeded);
+      fireEvent.change(grindInput(), { target: { value: '21' } });
+      expect(hint()).not.toBeInTheDocument();
+      fireEvent.change(beanSelect(), { target: { value: 'bean-2' } });
+      await act(async () => {});
+      expect(api.fetchLastGrind).not.toHaveBeenCalled();
+      expect(grindInput().value).toBe('21');
+    });
+
+    it('ignores a prefill that does not match the draft grind (the draft grind is then decided)', async () => {
+      renderSeeded({ grind: 'something else', date: '2026-10-03' });
+      expect(hint()).not.toBeInTheDocument();
+      fireEvent.change(beanSelect(), { target: { value: 'bean-2' } });
+      await act(async () => {});
+      expect(api.fetchLastGrind).not.toHaveBeenCalled();
+      expect(grindInput().value).toBe('20');
+    });
+  });
+
   it('works under StrictMode double effects', async () => {
     api.fetchLastGrind.mockResolvedValue(found('14'));
     renderPrefill({ strict: true });

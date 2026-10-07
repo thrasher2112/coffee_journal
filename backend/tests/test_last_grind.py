@@ -121,6 +121,22 @@ def test_empty_or_null_grind_is_skipped(auth_client, blank):
     assert _last(auth_client, bean).json() == {"grind_setting": "14", "date": "2026-10-01"}
 
 
+@pytest.mark.parametrize("blank", ["\t", "\n", " \t \n "])
+def test_whitespace_other_than_spaces_is_blank_and_hides_nothing(auth_client, blank):
+    bean = _bean(auth_client)
+    _brew(auth_client, bean, date="2026-10-01", grind="14")
+    _brew(auth_client, bean, date="2026-10-05", grind=blank)  # newer, tab/newline only
+
+    assert _last(auth_client, bean).json() == {"grind_setting": "14", "date": "2026-10-01"}
+
+
+def test_only_tab_grinds_gives_null(auth_client):
+    bean = _bean(auth_client)
+    _brew(auth_client, bean, grind="\t")
+
+    assert _last(auth_client, bean).json() is None
+
+
 def test_only_blank_grinds_gives_null(auth_client):
     bean = _bean(auth_client)
     _brew(auth_client, bean, grind="  ")
