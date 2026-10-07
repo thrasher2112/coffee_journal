@@ -2,11 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SettingsPage } from '../Settings';
 
-const api = vi.hoisted(() => ({ exportData: vi.fn(), importData: vi.fn() }));
+const api = vi.hoisted(() => ({ exportData: vi.fn(), importData: vi.fn(), fetchSetups: vi.fn() }));
 
 vi.mock('../../lib/api', () => ({
   exportData: api.exportData,
   importData: api.importData,
+  fetchSetups: api.fetchSetups,
+  createSetup: vi.fn(),
+  updateSetup: vi.fn(),
+  deleteSetup: vi.fn(),
   NetworkError: class extends Error {}
 }));
 
@@ -66,6 +70,7 @@ async function restoreFile(contents: unknown) {
 describe('Settings backup / restore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    api.fetchSetups.mockResolvedValue([]);
   });
 
   it('writes a version-2 backup that includes setups', async () => {
@@ -165,7 +170,7 @@ describe('Settings backup / restore', () => {
     expect(sent.beans).toHaveLength(2);
     expect(sent.brews).toHaveLength(1);
     expect(await screen.findByText(/Restored 2 beans and 1 brew\./)).toBeInTheDocument();
-    expect(screen.queryByText(/setup/i)).toBeNull();
+    expect(screen.queryByText(/\d+ setups?\b/i)).toBeNull();
   });
 
   it('says setups were not restored when an older server returns no setup counts', async () => {
@@ -187,5 +192,26 @@ describe('Settings backup / restore', () => {
     await restoreFile({ version: 1, beans: [], brews: [{ id: 'r1' }] });
 
     expect(await screen.findByText(/Restored 0 beans and 1 brew\./)).toBeInTheDocument();
+  });
+
+  it('keeps backup / restore working when the setups list fails to load', async () => {
+    api.fetchSetups.mockRejectedValue(new Error('offline'));
+    api.exportData.mockResolvedValue({ beans: [], brews: [], preferences: null });
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    openModal();
+
+    expect(await screen.findByText(/couldn.t load your setups/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /measurement preferences/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /download backup/i }));
+    expect(await screen.findByText(/backed up 0 beans/i)).toBeInTheDocument();
+  });
+
+  it('shows the setups section', async () => {
+    api.fetchSetups.mockResolvedValue([SETUP]);
+    render(<SettingsPage />);
+    expect(await screen.findByText('Office · Espresso')).toBeInTheDocument();
   });
 });

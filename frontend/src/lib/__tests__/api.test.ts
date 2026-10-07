@@ -59,4 +59,49 @@ describe('api request()', () => {
     const result = await deleteBean('some-id');
     expect(result).toBeUndefined();
   });
+
+  describe('setups', () => {
+    const ok = (status: number, body?: unknown) =>
+      (globalThis.fetch as any).mockResolvedValue({
+        ok: true,
+        status,
+        json: () => Promise.resolve(body)
+      });
+
+    it('lists, creates, patches and deletes against slash-less relative URLs', async () => {
+      const { fetchSetups, createSetup, updateSetup, deleteSetup } = await import('../api');
+
+      ok(200, [{ id: 's1' }]);
+      expect(await fetchSetups()).toEqual([{ id: 's1' }]);
+      expect((globalThis.fetch as any).mock.calls[0][0]).toBe('/api/setups');
+
+      ok(201, { id: 's2' });
+      await createSetup({ name: 'Office', brew_style: 'espresso', ratio: 2.5 });
+      let [url, init] = (globalThis.fetch as any).mock.calls[1];
+      expect(url).toBe('/api/setups');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({ name: 'Office', brew_style: 'espresso', ratio: 2.5 });
+
+      ok(200, { id: 's2' });
+      await updateSetup('s2', { grind_setting: null });
+      [url, init] = (globalThis.fetch as any).mock.calls[2];
+      expect(url).toBe('/api/setups/s2');
+      expect(init.method).toBe('PATCH');
+      expect(JSON.parse(init.body)).toEqual({ grind_setting: null });
+
+      ok(204);
+      expect(await deleteSetup('s2')).toBeUndefined();
+      [url, init] = (globalThis.fetch as any).mock.calls[3];
+      expect(url).toBe('/api/setups/s2');
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('exposes the HTTP status on rejected requests', async () => {
+      (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 409, json: () => Promise.resolve({}) });
+      const { createSetup, ApiError } = await import('../api');
+      const err = await createSetup({ name: 'x', brew_style: 'espresso', ratio: 2 }).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(409);
+    });
+  });
 });

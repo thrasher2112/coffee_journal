@@ -71,6 +71,36 @@ export interface Brew {
   updated_at: string;
 }
 
+/** A saved brew recipe/equipment combo, as the API returns it. */
+export interface BrewSetup {
+  id: string;
+  name: string;
+  brew_style: string;
+  ratio: number;
+  dose_g?: number | null;
+  grinder_name?: string | null;
+  grind_setting?: string | null;
+  target_time_s?: number | null;
+  machine_profile?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Body for POST /api/setups. Omitted or null optional fields stay unset. */
+export interface BrewSetupInput {
+  name: string;
+  brew_style: string;
+  ratio: number;
+  dose_g?: number | null;
+  grinder_name?: string | null;
+  grind_setting?: string | null;
+  target_time_s?: number | null;
+  machine_profile?: string | null;
+}
+
+/** Body for PATCH /api/setups/{id}: only the keys present change; null clears. */
+export type BrewSetupUpdate = Partial<BrewSetupInput>;
+
 export interface AgitationEvent {
   timestamp_s: number;
   action: string;

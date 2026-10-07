@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ExportImportModal } from '../components/ExportImportModal';
+import { SetupsSection } from '../components/SetupsSection';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
 import { exportData, importData, NetworkError } from '../lib/api';
@@ -264,6 +265,7 @@ export function SettingsPage() {
           })}
         </ul>
       </section>
+      <SetupsSection />
       <section className="journal-card space-y-4 p-6">
         <div>
           <h2 className="text-2xl font-display text-espresso">Account</h2>
