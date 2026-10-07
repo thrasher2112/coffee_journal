@@ -285,6 +285,42 @@ describe('QuickLogBar advanced defaults', () => {
   });
 });
 
+describe('QuickLogBar switching to espresso in the full form', () => {
+  it('drops the untouched pour-over bloom/total defaults, and saves without them', () => {
+    const onSave = vi.fn();
+    renderForm('full', onSave);
+    expect(bloomSeconds().value).toBe('45');
+    expect(totalMinutes().value).toBe('3');
+    fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
+    expect(bloomSeconds().value).toBe('');
+    expect(totalMinutes().value).toBe('');
+    expect(totalSeconds().value).toBe('');
+    fireEvent.click(screen.getByText('Save brew'));
+    const saved = onSave.mock.calls[0][0] as BrewDraft;
+    expect(saved.brew_style).toBe('espresso');
+    expect(saved.bloom_time_s).toBeUndefined();
+    expect(saved.total_brew_time_s).toBeUndefined();
+  });
+
+  it('keeps a user-entered 30 s bloom when switching to espresso', () => {
+    renderForm('full');
+    fireEvent.change(bloomSeconds(), { target: { value: '30' } });
+    fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
+    expect(bloomSeconds().value).toBe('30');
+    // the untouched total default is still dropped
+    expect(totalSeconds().value).toBe('');
+  });
+
+  it('switching back to pour-over restores the defaults for the unset fields', () => {
+    renderForm('full');
+    fireEvent.change(styleSelect(), { target: { value: 'espresso' } });
+    fireEvent.change(styleSelect(), { target: { value: 'pour-over' } });
+    expect(bloomSeconds().value).toBe('45');
+    expect(totalMinutes().value).toBe('3');
+    expect(totalSeconds().value).toBe('0');
+  });
+});
+
 describe('QuickLogBar initialDraft', () => {
   it('keeps the yield of an espresso initialDraft on mount (18 -> 54 stays 54)', () => {
     renderForm('full', vi.fn(), { ...baseDraft, brew_style: 'espresso', bean_weight_g: 18, water_weight_g: 54 });

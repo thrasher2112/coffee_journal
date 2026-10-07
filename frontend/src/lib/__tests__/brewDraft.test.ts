@@ -60,4 +60,37 @@ describe('applyStyle', () => {
     expect(applyStyle(makeDraft('b'), 'aeropress', { advanced: true }).bloom_time_s).toBe(45);
     expect(applyStyle(makeDraft('b'), 'espresso', { advanced: true }).bloom_time_s).toBeUndefined();
   });
+
+  it('moving to espresso clears bloom/total that are still the untouched defaults', () => {
+    const pourOver = makeDraft('b', 'pour-over', undefined, { advanced: true });
+    const next = applyStyle(pourOver, 'espresso', { advanced: true });
+    expect(next.bloom_time_s).toBeUndefined();
+    expect(next.total_brew_time_s).toBeUndefined();
+    expect(next.water_temp_c).toBe(96);
+  });
+
+  it('moving to espresso keeps bloom/total values the user changed', () => {
+    const pourOver = { ...makeDraft('b', 'pour-over', undefined, { advanced: true }), bloom_time_s: 30, total_brew_time_s: 200 };
+    const next = applyStyle(pourOver, 'espresso', { advanced: true });
+    expect(next.bloom_time_s).toBe(30);
+    expect(next.total_brew_time_s).toBe(200);
+  });
+
+  it('clears each default independently', () => {
+    const pourOver = { ...makeDraft('b', 'pour-over', undefined, { advanced: true }), total_brew_time_s: 200 };
+    const next = applyStyle(pourOver, 'espresso', { advanced: true });
+    expect(next.bloom_time_s).toBeUndefined();
+    expect(next.total_brew_time_s).toBe(200);
+  });
+
+  it('does not clear anything when the draft is already espresso', () => {
+    const espresso = { ...makeDraft('b', 'espresso'), bloom_time_s: 45, total_brew_time_s: 180 };
+    const next = applyStyle(espresso, 'espresso', { advanced: true });
+    expect(next).toMatchObject({ bloom_time_s: 45, total_brew_time_s: 180 });
+  });
+
+  it('moving from espresso to another style fills unset bloom/total', () => {
+    const next = applyStyle(makeDraft('b', 'espresso', undefined, { advanced: true }), 'pour-over', { advanced: true });
+    expect(next).toMatchObject({ bloom_time_s: 45, total_brew_time_s: 180 });
+  });
 });

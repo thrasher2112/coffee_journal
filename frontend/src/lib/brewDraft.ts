@@ -81,11 +81,19 @@ export function withAdvancedDefaults(draft: DraftForm): DraftForm {
 }
 
 // Picking a style by hand: set it, reset the yield to dose x that style's
-// first ratio (only when the dose is a number and the style has a preset), and
-// - in advanced mode - fill the style's unset advanced defaults.
+// first ratio (only when the dose is a number and the style has a preset),
+// clear untouched bloom/total defaults when moving to espresso, and - in
+// advanced mode - fill the style's unset advanced defaults.
 export function applyStyle(draft: DraftForm, style: string, options: { advanced?: boolean } = {}): DraftForm {
   const preset = getBrewStylePreset(style);
   const next: DraftForm = { ...draft, brew_style: style };
+  // Moving to espresso from another style: bloom/total still equal to the
+  // untouched other-style defaults are cleared (they'd otherwise be saved on a
+  // ~30 s shot). Anything the user changed to another value stays.
+  if (!hasTimedDefaults(style) && hasTimedDefaults(draft.brew_style)) {
+    if (draft.bloom_time_s === DEFAULT_BLOOM_TIME) next.bloom_time_s = undefined;
+    if (draft.total_brew_time_s === DEFAULT_BREW_TIME) next.total_brew_time_s = undefined;
+  }
   if (preset && typeof draft.bean_weight_g === 'number') {
     next.water_weight_g = roundYield(draft.bean_weight_g * preset.ratios[0]);
   }
