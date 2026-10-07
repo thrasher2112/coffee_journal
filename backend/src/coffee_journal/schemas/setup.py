@@ -23,6 +23,7 @@ SetupBrewStyle = Literal[*SETUP_BREW_STYLES]
 # Python's json module will happily emit them.
 Ratio = Annotated[float, Field(gt=0, le=30, allow_inf_nan=False)]
 DoseG = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+Text80 = Annotated[str, StringConstraints(max_length=80)]
 Text120 = Annotated[str, StringConstraints(max_length=120)]
 # One day. Also keeps the value inside Postgres int4.
 TargetTimeS = Annotated[int, Field(ge=0, le=86_400)]
@@ -37,6 +38,7 @@ def _blank_to_none(value):
 
 
 # Runs before the length check, so padding does not count against the limit.
+OptionalText80 = Annotated[Text80 | None, BeforeValidator(_blank_to_none)]
 OptionalText120 = Annotated[Text120 | None, BeforeValidator(_blank_to_none)]
 
 

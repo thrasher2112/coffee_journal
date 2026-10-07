@@ -5,6 +5,8 @@ import datetime as dt
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .setup import OptionalText80, OptionalText120
+
 
 class AgitationEvent(BaseModel):
     timestamp_s: int
@@ -27,6 +29,9 @@ class BrewBase(BaseModel):
     grind_setting: str | None = Field(None, max_length=120)
     grind_setting_notes: str | None = Field(None, max_length=2000)
     grinder_name: str | None = Field(None, max_length=120)
+    # Free-text snapshots, deliberately not checked against brew_setups.
+    setup_name: OptionalText80 = None
+    machine_profile: OptionalText120 = None
     water_temp_c: int | None = Field(None)
     bloom_time_s: int | None = Field(None)
     total_brew_time_s: int | None = Field(None)
@@ -56,6 +61,9 @@ class BrewUpdate(BaseModel):
     grind_setting: str | None = Field(None, max_length=120)
     grind_setting_notes: str | None = Field(None, max_length=2000)
     grinder_name: str | None = Field(None, max_length=120)
+    # Free-text snapshots, deliberately not checked against brew_setups.
+    setup_name: OptionalText80 = None
+    machine_profile: OptionalText120 = None
     water_temp_c: int | None = Field(None)
     bloom_time_s: int | None = Field(None)
     total_brew_time_s: int | None = Field(None)

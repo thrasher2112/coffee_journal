@@ -62,7 +62,8 @@ def create_brew(db: Session, data: dict) -> Brew:
 
 _BREW_MUTABLE_FIELDS = frozenset({
     "date", "bean_id", "bean_weight_g", "water_weight_g", "brew_style",
-    "grind_setting", "grind_setting_notes", "grinder_name", "water_temp_c",
+    "grind_setting", "grind_setting_notes", "grinder_name", "setup_name",
+    "machine_profile", "water_temp_c",
     "bloom_time_s", "total_brew_time_s", "agitation_events", "tasting_notes",
     "flavor_tags", "aroma_tags", "rating", "aroma_rating", "flavor_rating",
 })

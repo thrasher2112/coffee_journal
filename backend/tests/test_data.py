@@ -229,3 +229,62 @@ def test_full_backup_round_trip(auth_client):
     assert auth_client.get("/api/beans/").json()["total"] == 1
     assert auth_client.get("/api/brews/").json()["total"] == 1
     assert auth_client.get("/api/preferences").json()["temperature_unit"] == "fahrenheit"
+
+
+def test_setup_snapshot_survives_export_and_import(auth_client, make_client, second_user):
+    bean = auth_client.post("/api/beans/", json={"name": "Snap Bean"}).json()
+    brew = auth_client.post(
+        "/api/brews/",
+        json={
+            "date": date.today().isoformat(),
+            "bean_id": bean["id"],
+            "bean_weight_g": 18,
+            "water_weight_g": 36,
+            "setup_name": "Office",
+            "machine_profile": "Flat 6 bar",
+        },
+    ).json()
+
+    exported = auth_client.get("/api/export").json()
+    assert exported["brews"][0]["setup_name"] == "Office"
+    assert exported["brews"][0]["machine_profile"] == "Flat 6 bar"
+
+    other = make_client(second_user)
+    resp = other.post("/api/import", json=exported)
+    assert resp.status_code == 202, resp.text
+    imported = other.get("/api/brews/").json()["items"]
+    assert len(imported) == 1
+    assert imported[0]["id"] != brew["id"]
+    assert imported[0]["setup_name"] == "Office"
+    assert imported[0]["machine_profile"] == "Flat 6 bar"
+
+
+def test_import_updates_existing_brew_snapshot(auth_client):
+    bean = auth_client.post("/api/beans/", json={"name": "Snap Bean"}).json()
+    brew = auth_client.post(
+        "/api/brews/",
+        json={
+            "date": date.today().isoformat(),
+            "bean_id": bean["id"],
+            "bean_weight_g": 18,
+            "water_weight_g": 36,
+        },
+    ).json()
+    resp = auth_client.post(
+        "/api/import",
+        json={
+            "beans": [{"id": bean["id"], "name": "Snap Bean"}],
+            "brews": [
+                {
+                    "id": brew["id"],
+                    "date": date.today().isoformat(),
+                    "bean_id": bean["id"],
+                    "bean_weight_g": 18,
+                    "water_weight_g": 36,
+                    "setup_name": "Imported",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 202
+    assert auth_client.get(f"/api/brews/{brew['id']}").json()["setup_name"] == "Imported"

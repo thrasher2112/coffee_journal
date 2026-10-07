@@ -49,6 +49,9 @@ export interface Brew {
   bean_name?: string;
   brew_style?: string;
   grinder_name?: string;
+  // Snapshots of the setup the brew was logged from (plain text, no link).
+  setup_name?: string | null;
+  machine_profile?: string | null;
   bean_weight_g: number;
   water_weight_g: number;
   grind_setting?: string;
@@ -79,6 +82,8 @@ export interface BrewDraft {
   bean_id?: string;
   brew_style?: string;
   grinder_name?: string;
+  setup_name?: string;
+  machine_profile?: string;
   bean_weight_g: number;
   water_weight_g: number;
   date: string;

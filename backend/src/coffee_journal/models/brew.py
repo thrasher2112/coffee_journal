@@ -35,6 +35,10 @@ class Brew(Base):
     grind_setting: Mapped[str | None] = mapped_column(String(120))
     grind_setting_notes: Mapped[str | None] = mapped_column(Text)
     grinder_name: Mapped[str | None] = mapped_column(String(120))
+    # Snapshots of the setup the brew was logged from. Plain text on purpose:
+    # no FK, so renaming or deleting a setup never rewrites brew history.
+    setup_name: Mapped[str | None] = mapped_column(String(80))
+    machine_profile: Mapped[str | None] = mapped_column(String(120))
     water_temp_c: Mapped[int | None] = mapped_column(Integer)
     aroma_rating: Mapped[int | None] = mapped_column(Integer)
     flavor_rating: Mapped[int | None] = mapped_column(Integer)
