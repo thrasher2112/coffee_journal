@@ -2,7 +2,14 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 from ..brew_styles import SETUP_BREW_STYLES
 
@@ -17,6 +24,20 @@ SetupBrewStyle = Literal[*SETUP_BREW_STYLES]
 Ratio = Annotated[float, Field(gt=0, le=30, allow_inf_nan=False)]
 DoseG = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 Text120 = Annotated[str, StringConstraints(max_length=120)]
+# One day. Also keeps the value inside Postgres int4.
+TargetTimeS = Annotated[int, Field(ge=0, le=86_400)]
+
+
+def _blank_to_none(value):
+    """Strip optional text; whitespace-only becomes null (i.e. "not set")."""
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value
+
+
+# Runs before the length check, so padding does not count against the limit.
+OptionalText120 = Annotated[Text120 | None, BeforeValidator(_blank_to_none)]
 
 
 class SetupCreate(BaseModel):
@@ -24,10 +45,10 @@ class SetupCreate(BaseModel):
     brew_style: SetupBrewStyle
     ratio: Ratio
     dose_g: DoseG | None = None
-    grinder_name: Text120 | None = None
-    grind_setting: Text120 | None = None
-    target_time_s: int | None = Field(None, ge=0)
-    machine_profile: Text120 | None = None
+    grinder_name: OptionalText120 = None
+    grind_setting: OptionalText120 = None
+    target_time_s: TargetTimeS | None = None
+    machine_profile: OptionalText120 = None
 
 
 class SetupUpdate(BaseModel):
@@ -41,10 +62,10 @@ class SetupUpdate(BaseModel):
     brew_style: SetupBrewStyle | None = None
     ratio: Ratio | None = None
     dose_g: DoseG | None = None
-    grinder_name: Text120 | None = None
-    grind_setting: Text120 | None = None
-    target_time_s: int | None = Field(None, ge=0)
-    machine_profile: Text120 | None = None
+    grinder_name: OptionalText120 = None
+    grind_setting: OptionalText120 = None
+    target_time_s: TargetTimeS | None = None
+    machine_profile: OptionalText120 = None
 
     # Defaults are not validated, so this only fires when the client actually
     # sent the key - with null.

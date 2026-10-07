@@ -53,6 +53,16 @@ def name_taken(
     return db.scalars(stmt.limit(1)).first() is not None
 
 
+def _is_duplicate_name_error(exc: IntegrityError) -> bool:
+    # Postgres (psycopg) names the violated constraint in diag; SQLite only
+    # puts the index name in the message text.
+    diag = getattr(exc.orig, "diag", None)
+    constraint = getattr(diag, "constraint_name", None)
+    if constraint is not None:
+        return constraint == UNIQUE_NAME_INDEX
+    return UNIQUE_NAME_INDEX in str(exc.orig)
+
+
 def _commit(db: Session) -> None:
     """Commit, mapping a unique-name violation to DuplicateSetupName.
 
@@ -64,7 +74,7 @@ def _commit(db: Session) -> None:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        if UNIQUE_NAME_INDEX in str(exc.orig):
+        if _is_duplicate_name_error(exc):
             raise DuplicateSetupName from exc
         raise
 

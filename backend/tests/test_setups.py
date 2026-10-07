@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from coffee_journal.models import BrewSetup
@@ -221,6 +222,23 @@ def test_zero_target_time_ok(auth_client):
     assert _create(auth_client, target_time_s=0)["target_time_s"] == 0
 
 
+def test_target_time_upper_bound(auth_client):
+    # One day. Anything larger is nonsense and, unbounded, overflows int4 on
+    # Postgres (500).
+    assert _create(auth_client, target_time_s=86_400)["target_time_s"] == 86_400
+    for value in (86_401, 2**31, 10**12):
+        resp = auth_client.post("/api/setups", json={**BASE, "name": "t", "target_time_s": value})
+        assert resp.status_code == 422, value
+
+
+def test_target_time_upper_bound_on_patch(auth_client):
+    created = _create(auth_client)
+    url = f"/api/setups/{created['id']}"
+    assert auth_client.patch(url, json={"target_time_s": 86_400}).status_code == 200
+    assert auth_client.patch(url, json={"target_time_s": 86_401}).status_code == 422
+    assert auth_client.patch(url, json={"target_time_s": 2**31}).status_code == 422
+
+
 def test_fractional_target_time_422(auth_client):
     resp = auth_client.post("/api/setups", json={**BASE, "target_time_s": 36.5})
     assert resp.status_code == 422
@@ -401,24 +419,41 @@ def test_integrity_error_on_rename_maps_to_409(auth_client, monkeypatch):
     assert resp.status_code == 409
 
 
-def test_integrity_error_rolls_back_session(auth_client, db_session, monkeypatch):
-    """The failed transaction must be rolled back, or the request's session is
-    left unusable ("transaction has been rolled back due to a previous
-    exception")."""
+def test_session_usable_after_duplicate_integrity_error(db_session, test_user, monkeypatch):
+    """create_setup must roll back on the index violation; otherwise the session
+    is left in "transaction has been rolled back" state and the next query
+    raises PendingRollbackError."""
     from coffee_journal.crud import setup as setup_crud
 
-    _create(auth_client, name="Office")
-    monkeypatch.setattr(setup_crud, "name_taken", lambda *a, **k: False)
-    calls = []
-    real_rollback = db_session.rollback
-    monkeypatch.setattr(
-        db_session, "rollback", lambda: (calls.append(1), real_rollback())[1]
+    user_id = test_user.id
+    setup_crud.create_setup(
+        db_session, {"user_id": user_id, "name": "Office", "brew_style": "espresso", "ratio": 3}
     )
+    monkeypatch.setattr(setup_crud, "name_taken", lambda *a, **k: False)
 
-    resp = auth_client.post("/api/setups", json={**BASE, "name": "office"})
+    with pytest.raises(setup_crud.DuplicateSetupName):
+        setup_crud.create_setup(
+            db_session,
+            {"user_id": user_id, "name": "OFFICE", "brew_style": "espresso", "ratio": 3},
+        )
 
-    assert resp.status_code == 409
-    assert calls
+    # Would raise PendingRollbackError had the session not been rolled back.
+    db_session.scalars(select(BrewSetup)).all()
+
+
+def test_non_name_integrity_error_is_not_mapped_to_duplicate(db_session, test_user):
+    """Only the name index maps to DuplicateSetupName; any other integrity
+    error (here NOT NULL on brew_style) is a bug and must stay loud."""
+    from coffee_journal.crud import setup as setup_crud
+
+    data = {"user_id": test_user.id, "name": "Broken", "brew_style": None, "ratio": 3}
+
+    with pytest.raises(IntegrityError) as excinfo:
+        setup_crud.create_setup(db_session, data)
+
+    assert not isinstance(excinfo.value, setup_crud.DuplicateSetupName)
+    # Still rolled back, so the session is usable.
+    db_session.scalars(select(BrewSetup)).all()
 
 
 # --- Tenancy / auth ---------------------------------------------------------
@@ -472,3 +507,57 @@ def test_unauthenticated_401(client):
     assert client.post("/api/setups", json=BASE).status_code == 401
     assert client.patch("/api/setups/x", json={"ratio": 2}).status_code == 401
     assert client.delete("/api/setups/x").status_code == 401
+
+
+# --- Optional text normalisation --------------------------------------------
+
+OPTIONAL_TEXT = ("grinder_name", "grind_setting", "machine_profile")
+
+
+@pytest.mark.parametrize("field", OPTIONAL_TEXT)
+def test_optional_text_stripped_on_create(auth_client, field):
+    assert _create(auth_client, **{field: "  Niche Zero \t"})[field] == "Niche Zero"
+
+
+@pytest.mark.parametrize("field", OPTIONAL_TEXT)
+@pytest.mark.parametrize("blank", ["", "   ", "\t\n"])
+def test_blank_optional_text_becomes_null_on_create(auth_client, field, blank):
+    assert _create(auth_client, **{field: blank})[field] is None
+
+
+@pytest.mark.parametrize("field", OPTIONAL_TEXT)
+def test_optional_text_normalised_on_patch(auth_client, field):
+    created = _create(auth_client, **{field: "x"})
+    url = f"/api/setups/{created['id']}"
+
+    assert auth_client.patch(url, json={field: "  y "}).json()[field] == "y"
+    assert auth_client.patch(url, json={field: "  "}).json()[field] is None
+    # Omitted fields are untouched.
+    auth_client.patch(url, json={field: "z"})
+    assert auth_client.patch(url, json={"ratio": 2}).json()[field] == "z"
+
+
+def test_optional_text_length_checked_after_strip(auth_client):
+    assert _create(auth_client, grinder_name=" " + "x" * 120 + " ")["grinder_name"] == "x" * 120
+    resp = auth_client.post(
+        "/api/setups", json={**BASE, "name": "n2", "grinder_name": "x" * 121}
+    )
+    assert resp.status_code == 422
+
+
+# --- App-wide validation error handler --------------------------------------
+
+
+def test_validation_handler_survives_nan_on_other_routes(auth_client):
+    """FastAPI's default 422 echoes the input; NaN is not valid JSON, so the
+    default handler turned this into a 500."""
+    resp = auth_client.post(
+        "/api/beans/",
+        content='{"name": "Beans", "elevation_m": NaN}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list) and detail
+    assert detail[0]["input"] == "nan"

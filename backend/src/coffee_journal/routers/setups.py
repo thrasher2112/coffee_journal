@@ -43,7 +43,7 @@ def create_setup(
     try:
         return crud.setup.create_setup(db, data)
     except crud.setup.DuplicateSetupName:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_DUPLICATE_NAME)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_DUPLICATE_NAME) from None
 
 
 @router.get("/{setup_id}", response_model=SetupRead)
@@ -68,7 +68,7 @@ def update_setup(
     try:
         return crud.setup.update_setup(db, setup, payload.model_dump(exclude_unset=True))
     except crud.setup.DuplicateSetupName:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_DUPLICATE_NAME)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_DUPLICATE_NAME) from None
 
 
 @router.delete("/{setup_id}", status_code=status.HTTP_204_NO_CONTENT)

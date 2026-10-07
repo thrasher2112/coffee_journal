@@ -88,6 +88,7 @@ def _finite_only(value):
     return value
 
 
+# Exists because FastAPI's default 422 body cannot serialise a NaN/Infinity input.
 @app.exception_handler(RequestValidationError)
 async def _validation_error_handler(request: Request, exc: RequestValidationError):
     # Same body as FastAPI's default handler, except that it survives a client

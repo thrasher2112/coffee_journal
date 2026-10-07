@@ -19,9 +19,7 @@ class BrewSetup(Base):
 
     __tablename__ = "brew_setups"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid4()), unique=True
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
@@ -50,6 +48,7 @@ class BrewSetup(Base):
 
 
 # Names are unique per user, case-insensitively. A functional index works on
-# both Postgres and SQLite. Declared after the class so it can reference the
+# both Postgres and SQLite. Note SQLite's lower() folds ASCII only, so there
+# "É" and "é" count as different names; Postgres folds Unicode per its locale. Declared after the class so it can reference the
 # mapped columns.
 Index(UNIQUE_NAME_INDEX, BrewSetup.user_id, func.lower(BrewSetup.name), unique=True)
