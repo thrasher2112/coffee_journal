@@ -1,13 +1,30 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { AromaTag, Bean, BrewDraft, FlavorTag } from '../types';
+import type { AromaTag, Bean, BrewDraft, BrewSetup, FlavorTag } from '../types';
+import { fetchLastGrind } from '../lib/api';
+import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
+import { fromServer, localLastGrind, normalizeGrinder, pickSuggestion } from '../lib/lastGrind';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
 import { AromaTags } from './AromaTags';
 import { MinSecInput } from './MinSecInput';
 import { usePreferences } from '../contexts/PreferencesContext';
 import type { TemperatureUnit } from '../contexts/PreferencesContext';
-import { BREW_STYLE_PRESETS, type BrewStyle } from '../lib/brewStyles';
+import { BREW_STYLE_PRESETS, getBrewStylePreset, isBrewStyle } from '../lib/brewStyles';
+import {
+  DEFAULT_STYLE,
+  MIN_DOSE_G,
+  MIN_YIELD_G,
+  agitationTotalsFromEvents,
+  applySetup,
+  applyStyle,
+  makeDraft,
+  roundYield,
+  setupChipLabel,
+  withAdvancedDefaults,
+  type DraftForm,
+} from '../lib/brewDraft';
+import { readLastSetupId, writeLastSetupId } from '../lib/lastSetup';
 
 interface Props {
   beans: Bean[];
@@ -24,52 +41,55 @@ interface Props {
   // navigating to /brew, so switching to the full form doesn't lose
   // whatever was already typed in.
   initialDraft?: DraftForm;
+  // Saved setups for the chip row, loaded by the page alongside beans. Empty
+  // (not loaded yet, or the fetch failed) renders no chips.
+  setups?: BrewSetup[];
+  // Scopes the remembered last-used setup. Without it that is neither read
+  // nor written.
+  userId?: string;
+  // The grind the quick form had prefilled (value + brew date), carried across
+  // the quick -> full navigation next to initialDraft. Honoured only while the
+  // draft's grind still equals it, so the full form keeps the hint and keeps
+  // treating that grind as a suggestion (not a user decision) with no refetch.
+  initialGrindPrefill?: GrindPrefillInfo;
 }
 
-const DEFAULT_WATER_TEMP = 96;
-const DEFAULT_BLOOM_TIME = 45;
-const DEFAULT_BREW_TIME = 180;
-// Omit the numeric fields that allow a blank ('') input state before
-// re-adding them below — intersecting BrewDraft's plain `number` types
-// directly with a `number | ''` union would collapse back to `number`
-// (the empty-string member has no overlap with BrewDraft's type), silently
-// losing the "blank input" case these form fields rely on.
-export type DraftForm = Omit<
-  BrewDraft,
-  'bean_weight_g' | 'water_weight_g' | 'water_temp_c' | 'bloom_time_s' | 'total_brew_time_s'
-> & {
-  bean_weight_g: number | '';
-  water_weight_g: number | '';
-  water_temp_c?: number | '';
-  bloom_time_s?: number | '';
-  total_brew_time_s?: number | '';
+const NO_SETUPS: BrewSetup[] = [];
+
+// Names are unique per user, case-insensitively (the server 409s a duplicate).
+const findSetupByName = (setups: BrewSetup[], name: string | null | undefined) => {
+  const wanted = name?.toLowerCase();
+  return wanted ? setups.find((setup) => setup.name.toLowerCase() === wanted) : undefined;
 };
 
-const DEFAULT_BEAN_WEIGHT_G = 18;
+// "3 Oct" from the API's YYYY-MM-DD ("3 Oct 2025" when not this year), built in
+// local time so the day never shifts with the timezone. Anything unparseable
+// falls back to the raw string.
+const formatBrewDate = (iso: string): string => {
+  const [year, month, day] = iso.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (!year || !month || !day || Number.isNaN(date.getTime())) return iso;
+  const sameYear = year === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, {
+    ...(sameYear ? {} : { year: 'numeric' }),
+    month: 'short',
+    day: 'numeric',
+  });
+};
 
-const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?: string): DraftForm => ({
-  bean_id: beanId,
-  bean_weight_g: DEFAULT_BEAN_WEIGHT_G,
-  water_weight_g: Number((DEFAULT_BEAN_WEIGHT_G * BREW_STYLE_PRESETS[brewStyle].ratios[0]).toFixed(1)),
-  brew_style: brewStyle,
-  date: new Date().toISOString().slice(0, 10),
-  agitation_events: [],
-  flavor_tags: [],
-  aroma_tags: [],
-  tasting_notes: '',
-  rating: 8,
-  aroma_rating: 8,
-  flavor_rating: 8,
-  grinder_name: grinder,
-  grind_setting: ''
-});
+/** A prefilled grind and the date of the brew it came from. */
+export interface GrindPrefillInfo {
+  grind: string;
+  date: string;
+}
 
-const withAdvancedDefaults = (draft: DraftForm): DraftForm => ({
-  ...draft,
-  water_temp_c: draft.water_temp_c ?? DEFAULT_WATER_TEMP,
-  bloom_time_s: draft.bloom_time_s ?? DEFAULT_BLOOM_TIME,
-  total_brew_time_s: draft.total_brew_time_s ?? DEFAULT_BREW_TIME
-});
+// Internally also remembers which bean + grinder it answered for.
+interface GrindPrefill extends GrindPrefillInfo {
+  key: string;
+}
+
+const lookupKeyOf = (beanId: string | undefined, grinder: string | undefined) =>
+  `${beanId ?? ''}|${normalizeGrinder(grinder)}`;
 
 const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
   if (celsius === '' || celsius === undefined) return '';
@@ -77,79 +97,306 @@ const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) 
   return unit === 'fahrenheit' ? Math.round((celsius * 9) / 5 + 32).toString() : celsius.toString();
 };
 
-export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', initialDraft }: Props) {
+export function QuickLogBar({
+  beans,
+  onSave,
+  defaultBeanId,
+  variant = 'quick',
+  initialDraft,
+  setups = NO_SETUPS,
+  userId,
+  initialGrindPrefill,
+}: Props) {
   const { preferences, setPreferredGrinder } = usePreferences();
   const [isAdvanced, setIsAdvanced] = useState(variant === 'full');
-  const [brewStyle, setBrewStyle] = useState<BrewStyle>(
-    () => (initialDraft?.brew_style as BrewStyle | undefined) ?? 'pour-over'
+  // form.brew_style is the single source of truth for the style. State
+  // changes are explicit transitions (applyStyle, makeDraft, ...) applied via
+  // setForm; there is deliberately no effect reacting to brew_style or yield,
+  // so a programmatic style + yield change is never clobbered by a default.
+  const [form, setForm] = useState<DraftForm>(() => {
+    if (initialDraft) {
+      // The incoming draft wins over defaults; the full form only fills the
+      // advanced fields it left unset.
+      const draft = { ...initialDraft, brew_style: initialDraft.brew_style || DEFAULT_STYLE };
+      return variant === 'full' ? withAdvancedDefaults(draft) : draft;
+    }
+    return makeDraft({
+      beanId: defaultBeanId,
+      grinder: preferences.preferredGrinder,
+      advanced: variant === 'full',
+    });
+  });
+  const [waterTempInput, setWaterTempInput] = useState<string>(() =>
+    toDisplayTemp(form.water_temp_c, preferences.temperatureUnit)
   );
-  const [form, setForm] = useState<DraftForm>(
-    () => initialDraft ?? makeDraft(defaultBeanId, 'pour-over', preferences.preferredGrinder)
-  );
-  const [waterTempInput, setWaterTempInput] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  // True once the grinder on the current draft has been decided by someone
+  // other than preference hydration: the user picked or cleared it, or the
+  // draft arrived with its own (possibly empty) grinder. Hydration then
+  // leaves it alone, so a grinder that was deliberately cleared (by the user,
+  // or later by a setup that has none) is not refilled. Reset/save start a
+  // fresh draft and clear it. Any code that applies a draft with a deliberate
+  // grinder choice (e.g. a setup) must set this too.
+  const grinderDecided = useRef(initialDraft !== undefined);
+  // The last-used setup auto-applies at most once per fresh draft, and never
+  // over an incoming draft, a chip the user already picked, or edits they have
+  // already made (setups can arrive after the form is on screen).
+  // `touched` flips on the first user edit; Reset/save start a fresh draft,
+  // which resolves the setup question itself (see startFreshDraft).
+  const autoApplyDone = useRef(initialDraft !== undefined);
+  const touched = useRef(false);
+
+  // The grind input is prefilled from the last brew of this bean on this
+  // grinder (see the lookup effect below). `grindDecided` is true once someone
+  // other than that lookup owns the value: the user typed in the grind input,
+  // or the draft arrived with a grind of its own. A decided grind is never
+  // overwritten, and Reset/save (a fresh draft) clear the flag. `prefill`
+  // records what the lookup wrote (value + brew date, for the hint); it is set
+  // exactly while the grind in the form is a prefilled one, and the ref mirrors
+  // it for the effect, which must not depend on it. `draftNonce` re-runs the
+  // lookup for a fresh draft whose bean and grinder did not change.
+  // A carried prefill only counts while the draft's grind is still that value;
+  // any other non-empty draft grind is the incoming draft's own, i.e. decided.
+  const seededPrefill: GrindPrefill | null =
+    initialDraft?.grind_setting?.trim() &&
+    initialGrindPrefill &&
+    initialGrindPrefill.grind === initialDraft.grind_setting
+      ? { ...initialGrindPrefill, key: lookupKeyOf(initialDraft.bean_id, initialDraft.grinder_name) }
+      : null;
+  const grindDecided = useRef(!!initialDraft?.grind_setting?.trim() && !seededPrefill);
+  const [prefill, setPrefillState] = useState<GrindPrefill | null>(seededPrefill);
+  const prefillRef = useRef<GrindPrefill | null>(seededPrefill);
+  const setPrefill = (next: GrindPrefill | null) => {
+    prefillRef.current = next;
+    setPrefillState(next);
+  };
+  const [draftNonce, setDraftNonce] = useState(0);
+  // The quick form has no grind field by default (it is an advanced field), but
+  // a grind it will save must be visible and editable. So the field appears once
+  // the draft has a grind - prefilled, typed or carried in - and then stays for
+  // that draft, so it cannot vanish under the cursor (as with machine profile).
+  const [grindVisible, setGrindVisible] = useState(!!initialDraft?.grind_setting?.trim());
+  // Set when the grinder changes under a grind the user typed (see the effect).
+  const [grinderWarning, setGrinderWarning] = useState(false);
+  // Brews logged on this device and not yet synced. They can be newer than
+  // anything the server knows, so the grind suggestion considers them too.
+  const { unsynced } = useLocalBrewStore();
+  const unsyncedRef = useRef(unsynced);
+  // Latest form, for the lookup's stale check when its response arrives.
+  const formRef = useRef(form);
+
+  // The selected chip is derived from the draft's setup_name (case-insensitive;
+  // names are unique per user), so it is one source of truth: an incoming
+  // draft shows its chip selected with no re-apply, editing fields leaves it
+  // selected ("started from"), and deselecting clears setup_name.
+  //
+  // A setup_name with no matching setup (the setup was renamed or deleted
+  // since, or the setups failed to load) is kept on purpose: it is the
+  // historical snapshot of what this brew started from. It just has no chip,
+  // and nothing re-applies or clears it.
+  const selectedSetup = useMemo(() => findSetupByName(setups, form.setup_name), [form.setup_name, setups]);
+
+  // Keep the water-temp text buffer in step with the draft's value (a default
+  // applied, a reset, a unit switch) without fighting an edit in progress:
+  // resync only when what the buffer currently means differs from the draft.
+  useEffect(() => {
+    const unit = preferences.temperatureUnit;
+    const typed = Number(waterTempInput);
+    const typedCelsius =
+      waterTempInput === '' || Number.isNaN(typed)
+        ? undefined
+        : unit === 'fahrenheit'
+          ? Math.round(((typed - 32) * 5) / 9)
+          : typed;
+    const current = form.water_temp_c === '' ? undefined : form.water_temp_c;
+    if (typedCelsius === current) return;
+    setWaterTempInput(toDisplayTemp(form.water_temp_c, unit));
+    // waterTempInput is the buffer being compared, not a trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.water_temp_c, preferences.temperatureUnit]);
 
   useEffect(() => {
-    setWaterTempInput(toDisplayTemp(form.water_temp_c, preferences.temperatureUnit));
-  }, [preferences.temperatureUnit]);
+    formRef.current = form;
+    unsyncedRef.current = unsynced;
+  });
+
+  // Prefill the grind from the last brew of this bean on this grinder. Keyed on
+  // the bean and the normalised grinder (however they got there: bean pick,
+  // grinder select, setup apply, preference hydration, initial mount), plus the
+  // fresh-draft nonce. External sync, so an effect is the right tool - unlike
+  // style/yield defaults, which are explicit transitions.
+  const lookupBeanId = form.bean_id;
+  const lookupKey = normalizeGrinder(form.grinder_name);
+
+  // Swapping the grinder under a grind the user typed or brought with the draft
+  // leaves the text alone (it may well still be right) but flags it: grind
+  // settings do not carry between grinders. A prefilled grind is not decided
+  // and is re-looked-up instead; coming from no grinder at all is a first
+  // choice, not a swap.
+  const previousGrinderKey = useRef(lookupKey);
+  useEffect(() => {
+    const previous = previousGrinderKey.current;
+    previousGrinderKey.current = lookupKey;
+    if (previous && previous !== lookupKey && grindDecided.current && formRef.current.grind_setting?.trim()) {
+      setGrinderWarning(true);
+    }
+  }, [lookupKey]);
+
+  useEffect(() => {
+    if (grindDecided.current) return;
+    // A prefill carried in from the quick form already answers for this very
+    // bean and grinder: keep it, no refetch.
+    if (prefillRef.current?.key === lookupKeyOf(lookupBeanId, lookupKey)) return;
+    // The bean or grinder moved on from what an earlier lookup filled in: that
+    // grind belongs to the old pair, so drop it (and its hint) now. A new
+    // lookup below may put a new one in; a failed or empty one leaves it blank.
+    const stale = prefillRef.current;
+    if (stale) {
+      setPrefill(null);
+      setForm((prev) => (prev.grind_setting === stale.grind ? { ...prev, grind_setting: '' } : prev));
+    }
+    if (!lookupBeanId || !lookupKey) return;
+
+    // Set by cleanup: the key changed, a fresh draft began, or the component
+    // unmounted (or StrictMode's dev-only double mount) - the response is stale.
+    let cancelled = false;
+    // Queued offline brews count too: a newer one there beats the server's
+    // answer, and it is the only source when the server cannot be reached.
+    const queued = localLastGrind(unsyncedRef.current, lookupBeanId, lookupKey);
+    // The grinder as typed, trimmed; the API matches it case-insensitively.
+    fetchLastGrind(lookupBeanId, formRef.current.grinder_name?.trim() ?? '')
+      .then(
+        (result) => (result?.grind_setting?.trim() ? fromServer(result) : null),
+        // Offline or failing: no server answer; a queued brew may still help.
+        () => null
+      )
+      .then((server) => {
+        const suggestion = pickSuggestion(queued, server);
+        if (cancelled || grindDecided.current || !suggestion) return;
+        const grind = suggestion.grind;
+        // Belt and braces: the `cancelled` flag already covers a changed key;
+        // this re-checks the live form in case a path changes it without
+        // re-running the effect.
+        const latest = formRef.current;
+        if (
+          latest.bean_id !== lookupBeanId ||
+          normalizeGrinder(latest.grinder_name) !== lookupKey ||
+          latest.grind_setting?.trim()
+        ) {
+          return;
+        }
+        // Raw setForm, not update(): a prefill is not a user edit, so it must
+        // not block the last-used setup auto-apply.
+        setForm((prev) => ({ ...prev, grind_setting: grind }));
+        setPrefill({ grind, date: suggestion.date, key: lookupKeyOf(lookupBeanId, lookupKey) });
+        setGrindVisible(true);
+      })
+      // Whatever goes wrong, the form never waits on or breaks because of this.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lookupBeanId, lookupKey, draftNonce]);
 
   useEffect(() => {
     if (!defaultBeanId) return;
-    setForm((prev) =>
-      prev.bean_id
-        ? prev
-        : {
-            ...prev,
-            bean_id: defaultBeanId,
-            brew_style: brewStyle,
-          }
-    );
-  }, [defaultBeanId, brewStyle]);
+    setForm((prev) => (prev.bean_id ? prev : { ...prev, bean_id: defaultBeanId }));
+  }, [defaultBeanId]);
 
+  // Preferences can load after mount; fill the preferred grinder unless this
+  // draft's grinder was already decided (see grinderDecided).
   useEffect(() => {
-    if (!preferences.preferredGrinder) return;
-    setForm((prev) => {
-      if (prev.grinder_name) {
-        return prev;
-      }
-      return { ...prev, grinder_name: preferences.preferredGrinder };
-    });
+    if (!preferences.preferredGrinder || grinderDecided.current) return;
+    setForm((prev) => (prev.grinder_name ? prev : { ...prev, grinder_name: preferences.preferredGrinder }));
   }, [preferences.preferredGrinder]);
 
-  const isFirstBrewStyleRun = useRef(true);
+  // Replace all setup-controlled fields in one update. The grinder is decided
+  // by the setup even when it names none, so hydration leaves it alone.
+  const applySetupToForm = (setup: BrewSetup) => {
+    grinderDecided.current = true;
+    setForm((prev) => applySetup(prev, setup, { advanced: isAdvanced }));
+  };
+
+  // Last-used setup, once setups have loaded. A remembered id that no longer
+  // exists is ignored silently. Whatever the outcome, the one-shot is spent.
   useEffect(() => {
-    if (isFirstBrewStyleRun.current) {
-      isFirstBrewStyleRun.current = false;
+    if (autoApplyDone.current || !userId || setups.length === 0) return;
+    autoApplyDone.current = true;
+    if (touched.current) return;
+    const remembered = readLastSetupId(userId);
+    const setup = remembered ? setups.find((item) => item.id === remembered) : undefined;
+    if (setup) applySetupToForm(setup);
+    // applySetupToForm only reads isAdvanced as of this render; the effect is
+    // keyed on the data that arrives (setups, userId), not on it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setups, userId]);
+
+  const handleSetupChip = (setup: BrewSetup) => {
+    autoApplyDone.current = true;
+    if (selectedSetup?.id === setup.id) {
+      // Deselect: keep every value, drop the provenance.
+      setForm((prev) => ({ ...prev, setup_name: undefined, machine_profile: undefined }));
+      writeLastSetupId(userId, null);
       return;
     }
-    const preferredRatio = BREW_STYLE_PRESETS[brewStyle].ratios[0];
-    setForm((prev) => {
-      if (prev.bean_weight_g === '' || prev.water_weight_g === '') {
-        return { ...prev, brew_style: brewStyle };
-      }
-      const nextYield = Number((prev.bean_weight_g * preferredRatio).toFixed(1));
-      const shouldUpdateYield = Math.abs(prev.water_weight_g - nextYield) >= 0.1;
-      return {
-        ...prev,
-        brew_style: brewStyle,
-        water_weight_g: shouldUpdateYield ? nextYield : prev.water_weight_g,
-      };
-    });
-  }, [brewStyle]);
+    applySetupToForm(setup);
+    writeLastSetupId(userId, setup.id);
+  };
 
-  useEffect(() => {
-    if (!isAdvanced) return;
-    setForm((prev) => withAdvancedDefaults(prev));
-  }, [isAdvanced]);
+  const handleStyleChange = (style: string) => {
+    touched.current = true;
+    setForm((prev) => {
+      const next = applyStyle(prev, style, { advanced: isAdvanced });
+      // Moving to a different style than the selected setup's means the brew is
+      // no longer "from" it: drop the provenance in the same update (the chip
+      // deselects, and Reset/save won't re-apply the setup and flip the style
+      // back). The same style keeps it. The remembered last-used id is left
+      // alone: it records the last chip tapped, not what the form holds.
+      const from = findSetupByName(setups, prev.setup_name);
+      if (from && from.brew_style !== style) {
+        next.setup_name = undefined;
+        next.machine_profile = undefined;
+      }
+      return next;
+    });
+  };
+
+  // A fresh draft (Reset, or after a save) for the style currently selected,
+  // built in one go: if a setup was selected it is re-applied onto the fresh
+  // draft (its style wins), otherwise the style's defaults stand.
+  const startFreshDraft = (
+    beanId: string | undefined,
+    style: string | undefined,
+    setup: BrewSetup | undefined
+  ) => {
+    autoApplyDone.current = true;
+    touched.current = false;
+    setAgitationTotals([]);
+    let draft = makeDraft({
+      beanId,
+      style: style || DEFAULT_STYLE,
+      grinder: preferences.preferredGrinder,
+      advanced: isAdvanced,
+    });
+    // A setup also decides the grinder (even an empty one); without one, the
+    // preferred grinder hydrates again.
+    grinderDecided.current = setup !== undefined;
+    // The grind is looked up afresh for the new draft: it starts undecided and
+    // unprefilled, and the nonce re-runs the lookup even when bean and grinder
+    // are unchanged (after a save, the brew just saved is now the newest).
+    grindDecided.current = false;
+    setPrefill(null);
+    setGrindVisible(false);
+    setGrinderWarning(false);
+    setDraftNonce((n) => n + 1);
+    if (setup) draft = applySetup(draft, setup, { advanced: isAdvanced });
+    setForm(draft);
+  };
 
   const handleAdvancedToggle = (checked: boolean) => {
     setIsAdvanced(checked);
     if (checked) {
-      setForm((prev) => {
-        const next = withAdvancedDefaults(prev);
-        setWaterTempInput(toDisplayTemp(next.water_temp_c, preferences.temperatureUnit));
-        return next;
-      });
+      setForm((prev) => withAdvancedDefaults(prev));
     }
   };
 
@@ -159,16 +406,43 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
     if (!Number.isFinite(beanWeight) || beanWeight === 0 || !Number.isFinite(waterWeight)) return undefined;
     return waterWeight / beanWeight;
   }, [beanWeight, waterWeight]);
-  const stylePresets = BREW_STYLE_PRESETS[brewStyle];
+  const brewStyle = form.brew_style ?? DEFAULT_STYLE;
+  // Undefined for a style outside the presets (an old brew, an import): no
+  // ratio chips, and the select shows the raw value as an extra option.
+  const stylePresets = getBrewStylePreset(brewStyle);
   const grinderOptions = preferences.grinders;
-  const selectedGrinder =
-    form.grinder_name && grinderOptions.includes(form.grinder_name) ? form.grinder_name : '';
+  // A grinder named by a setup or an incoming draft that is not in the
+  // preferences list still shows as selected, as an extra option (preferences
+  // are not written to).
+  const selectedGrinder = form.grinder_name ?? '';
+  const extraGrinder = selectedGrinder && !grinderOptions.includes(selectedGrinder) ? selectedGrinder : undefined;
+
+  // Editable, because a setup only suggests the profile: a shot run on another
+  // DE1 profile must be recordable. Editing it changes neither setup_name nor
+  // the chip, and never the saved setup. The advanced form always has it; the
+  // quick form shows it only while the draft carries a profile (a setup
+  // brought one) - '' after clearing still counts, so the field does not vanish
+  // under the cursor. A blank profile is saved as none.
+  const machineProfileField = (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-xs uppercase tracking-[0.3em] text-moss">Machine profile</span>
+      <input
+        type="text"
+        maxLength={120}
+        value={form.machine_profile ?? ''}
+        onChange={(event) => update('machine_profile', event.target.value)}
+        className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
+      />
+    </label>
+  );
 
   const update = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => {
+    touched.current = true;
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const toggleTag = (tag: FlavorTag) => {
+    touched.current = true;
     setForm((prev) => {
       const exists = prev.flavor_tags.includes(tag);
       return {
@@ -179,6 +453,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   };
 
   const toggleAromaTag = (tag: AromaTag) => {
+    touched.current = true;
     setForm((prev) => {
       const nextList = prev.aroma_tags ?? [];
       const exists = nextList.includes(tag);
@@ -195,7 +470,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   // difference against the previous row's total, kept in its own array
   // rather than reverse-engineered from amount_g each time so an edit to an
   // earlier row's total doesn't need any special-casing to ripple forward.
-  const [agitationTotals, setAgitationTotals] = useState<Array<number | ''>>([]);
+  const [agitationTotals, setAgitationTotals] = useState<Array<number | ''>>(() =>
+    agitationTotalsFromEvents(initialDraft?.agitation_events ?? [])
+  );
 
   const deriveAgitationAmounts = (totals: Array<number | ''>): Array<number | undefined> => {
     let runningTotal = 0;
@@ -247,6 +524,11 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
       alert('Enter dose and yield before saving.');
       return;
     }
+    // Captured before awaiting: the fresh draft that follows a save is built
+    // from what was submitted, not from whatever the form holds by then.
+    const savedBeanId = form.bean_id;
+    const savedStyle = form.brew_style;
+    const savedSetup = selectedSetup;
     setSaving(true);
     try {
       const payload: BrewDraft = {
@@ -255,15 +537,11 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
         water_weight_g: form.water_weight_g,
         water_temp_c: form.water_temp_c === '' ? undefined : form.water_temp_c,
         bloom_time_s: form.bloom_time_s === '' ? undefined : form.bloom_time_s,
-        total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s
+        total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s,
+        machine_profile: form.machine_profile?.trim() ? form.machine_profile.trim() : undefined
       };
       await onSave(payload);
-      setForm(() => {
-        const draft = makeDraft(form.bean_id, brewStyle, preferences.preferredGrinder);
-        setWaterTempInput('');
-        setAgitationTotals([]);
-        return draft;
-      });
+      startFreshDraft(savedBeanId, savedStyle, savedSetup);
     } finally {
       setSaving(false);
     }
@@ -275,7 +553,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   const handleWaterTempChange = (rawValue: string) => {
     setWaterTempInput(rawValue);
     if (rawValue === '') {
-      update('water_temp_c', undefined);
+      // '' (blanked on purpose), not undefined (unset): only unset gets the
+      // 96 C default back from withAdvancedDefaults.
+      update('water_temp_c', '');
       return;
     }
     const parsed = Number(rawValue);
@@ -286,7 +566,49 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
     update('water_temp_c', celsius);
   };
 
+  // Typing takes ownership of the grind: the lookup never overwrites it, the
+  // hint (which described a suggestion) goes away, and a response still in
+  // flight is dropped when it lands.
+  const handleGrindChange = (value: string) => {
+    grindDecided.current = true;
+    setPrefill(null);
+    setGrinderWarning(false);
+    setGrindVisible(true);
+    update('grind_setting', value);
+  };
+
+  // The hint and the warning are descriptions of the input, not part of its name.
+  const grindDescription =
+    [prefill ? 'grind-prefill-hint' : null, grinderWarning ? 'grind-warning' : null].filter(Boolean).join(' ') ||
+    undefined;
+  const grindField = (
+    <div className="flex flex-col gap-1 text-sm">
+      <label className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
+        <input
+          type="text"
+          value={form.grind_setting ?? ''}
+          placeholder="e.g., 18, 7.5, 24 clicks"
+          aria-describedby={grindDescription}
+          onChange={(event) => handleGrindChange(event.target.value)}
+          className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
+        />
+      </label>
+      {prefill && (
+        <p id="grind-prefill-hint" className="text-xs text-moss">
+          from your {formatBrewDate(prefill.date)} brew
+        </p>
+      )}
+      {grinderWarning && (
+        <p id="grind-warning" className="text-xs text-ember">
+          Grinder changed — check grind setting
+        </p>
+      )}
+    </div>
+  );
+
   const handleGrinderSelect = (value: string) => {
+    grinderDecided.current = true;
     if (!value) {
       update('grinder_name', undefined);
       return;
@@ -306,9 +628,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
               Style
               <select
                 value={brewStyle}
-                onChange={(event) => setBrewStyle(event.target.value as BrewStyle)}
+                onChange={(event) => handleStyleChange(event.target.value)}
                 className="min-h-11 min-w-[170px] rounded-full border border-caramel/40 bg-espresso/60 px-3 py-1 text-crema text-sm normal-case"
               >
+                {!isBrewStyle(brewStyle) && <option value={brewStyle}>{`${brewStyle} (custom)`}</option>}
                 {Object.entries(BREW_STYLE_PRESETS).map(([value, meta]) => (
                   <option key={value} value={value}>
                     {meta.label}
@@ -332,7 +655,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
           ) : (
             <Link
               to="/brew"
-              state={{ draft: form }}
+              state={{
+                draft: form,
+                grindPrefill: prefill ? { grind: prefill.grind, date: prefill.date } : undefined,
+              }}
               className="inline-flex min-h-11 items-center justify-center min-h-11 text-xs uppercase tracking-[0.3em] text-caramel"
             >
               Full Brew Log
@@ -341,10 +667,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
           <button
             type="button"
             className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
-            onClick={() => {
-              setForm(makeDraft(defaultBeanId, brewStyle, preferences.preferredGrinder));
-              setAgitationTotals([]);
-            }}
+            onClick={() => startFreshDraft(defaultBeanId, form.brew_style, selectedSetup)}
           >
             Reset
           </button>
@@ -352,14 +675,41 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
       </div>
 
       <form onSubmit={handleSubmit} className="mt-6 grid gap-6">
+        {setups.length > 0 && (
+          <div role="group" aria-label="Brew setups" className="flex flex-wrap gap-2">
+            {setups.map((setup) => {
+              const isSelected = selectedSetup?.id === setup.id;
+              return (
+                <button
+                  key={setup.id}
+                  type="button"
+                  aria-pressed={isSelected}
+                  disabled={saving}
+                  onClick={() => handleSetupChip(setup)}
+                  className={`min-h-11 rounded-full border px-4 py-1 text-sm disabled:opacity-60 ${
+                    isSelected ? 'border-ember bg-ember/90 text-crema' : 'border-caramel/40 text-espresso'
+                  }`}
+                >
+                  {setupChipLabel(setup)}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="grid gap-4 md:grid-cols-3">
-          <BeanPicker beans={beans} value={form.bean_id} onChange={(value) => update('bean_id', value)} />
+          {/* Raw setForm, not update(): picking a bean is not an edit that should
+              block the last-used auto-apply (a setup never touches the bean). */}
+          <BeanPicker
+            beans={beans}
+            value={form.bean_id}
+            onChange={(value) => setForm((prev) => ({ ...prev, bean_id: value }))}
+          />
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Dose (g)</span>
             <input
               type="number"
-              min={5}
-              step={0.5}
+              min={MIN_DOSE_G}
+              step="any"
               value={form.bean_weight_g === '' ? '' : form.bean_weight_g}
               onChange={(event) =>
                 update('bean_weight_g', event.target.value === '' ? '' : Number(event.target.value))
@@ -371,8 +721,8 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Yield (g)</span>
             <input
               type="number"
-              min={50}
-              step={1}
+              min={MIN_YIELD_G}
+              step={0.1}
               value={form.water_weight_g === '' ? '' : form.water_weight_g}
               onChange={(event) =>
                 update('water_weight_g', event.target.value === '' ? '' : Number(event.target.value))
@@ -384,7 +734,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
 
         <div className="flex flex-wrap items-center gap-4 text-sm text-moss">
           <span>Ratio: {ratio ? ratio.toFixed(1) : '—'}</span>
-          {stylePresets.ratios.map((value) => {
+          {(stylePresets?.ratios ?? []).map((value) => {
             const isActive = ratio ? Math.abs(ratio - value) < 0.1 : false;
             return (
               <button
@@ -394,7 +744,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
                   update(
                     'water_weight_g',
                     typeof form.bean_weight_g === 'number'
-                      ? Number((form.bean_weight_g * value).toFixed(1))
+                      ? roundYield(form.bean_weight_g * value)
                       : form.water_weight_g
                   )
                 }
@@ -407,6 +757,9 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
             );
           })}
         </div>
+
+        {!isAdvanced && form.machine_profile !== undefined && machineProfileField}
+        {!isAdvanced && grindVisible && grindField}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="flex flex-col gap-4 text-sm">
@@ -476,12 +829,12 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
               </label>
               <MinSecInput
                 label="Bloom time"
-                valueSeconds={form.bloom_time_s === '' ? '' : form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
+                valueSeconds={form.bloom_time_s ?? ''}
                 onChange={(seconds) => update('bloom_time_s', seconds)}
               />
               <MinSecInput
                 label="Total brew time"
-                valueSeconds={form.total_brew_time_s === '' ? '' : form.total_brew_time_s ?? DEFAULT_BREW_TIME}
+                valueSeconds={form.total_brew_time_s ?? ''}
                 onChange={(seconds) => update('total_brew_time_s', seconds)}
               />
               <label className="flex flex-col gap-1 text-sm">
@@ -497,18 +850,11 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
                       {grinder}
                     </option>
                   ))}
+                  {extraGrinder && <option value={extraGrinder}>{extraGrinder}</option>}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
-                <input
-                  type="text"
-                  value={form.grind_setting ?? ''}
-                  placeholder="e.g., 18, 7.5, 24 clicks"
-                  onChange={(event) => update('grind_setting', event.target.value)}
-                  className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
-                />
-              </label>
+              {grindField}
+              {machineProfileField}
             </div>
             <div className="space-y-4">
               <FlavorWheel selected={form.flavor_tags} onToggle={toggleTag} />

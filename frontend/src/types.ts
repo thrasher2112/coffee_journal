@@ -49,6 +49,9 @@ export interface Brew {
   bean_name?: string;
   brew_style?: string;
   grinder_name?: string;
+  // Snapshots of the setup the brew was logged from (plain text, no link).
+  setup_name?: string | null;
+  machine_profile?: string | null;
   bean_weight_g: number;
   water_weight_g: number;
   grind_setting?: string;
@@ -68,6 +71,42 @@ export interface Brew {
   updated_at: string;
 }
 
+/** A saved brew recipe/equipment combo, as the API returns it. */
+export interface BrewSetup {
+  id: string;
+  name: string;
+  brew_style: string;
+  ratio: number;
+  dose_g?: number | null;
+  grinder_name?: string | null;
+  target_time_s?: number | null;
+  machine_profile?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Body for POST /api/setups. Omitted or null optional fields stay unset. */
+export interface BrewSetupInput {
+  name: string;
+  brew_style: string;
+  ratio: number;
+  dose_g?: number | null;
+  grinder_name?: string | null;
+  target_time_s?: number | null;
+  machine_profile?: string | null;
+}
+
+/** Body for PATCH /api/setups/{id}: only the keys present change; null clears. */
+export type BrewSetupUpdate = Partial<BrewSetupInput>;
+
+/** GET /api/brews/last-grind: the newest matching brew's grind and date (YYYY-MM-DD). */
+export interface LastGrind {
+  grind_setting: string;
+  date: string;
+  // When the brew was logged (ISO timestamp); orders same-day brews.
+  created_at?: string;
+}
+
 export interface AgitationEvent {
   timestamp_s: number;
   action: string;
@@ -79,6 +118,8 @@ export interface BrewDraft {
   bean_id?: string;
   brew_style?: string;
   grinder_name?: string;
+  setup_name?: string;
+  machine_profile?: string;
   bean_weight_g: number;
   water_weight_g: number;
   date: string;

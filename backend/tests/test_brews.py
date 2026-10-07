@@ -187,3 +187,115 @@ def test_brew_ratio_computation(auth_client):
 def test_unauthenticated_brew_returns_401(client):
     resp = client.get("/api/brews/")
     assert resp.status_code == 401
+
+
+# --- setup snapshot columns -------------------------------------------------
+
+
+def _brew_payload(bean_id, **extra):
+    return {
+        "date": date.today().isoformat(),
+        "bean_id": bean_id,
+        "bean_weight_g": 18,
+        "water_weight_g": 36,
+        **extra,
+    }
+
+
+def test_brew_setup_snapshot_round_trips(auth_client):
+    bean_id = _create_bean(auth_client)
+    resp = auth_client.post(
+        "/api/brews/",
+        json=_brew_payload(bean_id, setup_name="Office", machine_profile="Flat 6 bar"),
+    )
+    assert resp.status_code == 201
+    created = resp.json()
+    assert created["setup_name"] == "Office"
+    assert created["machine_profile"] == "Flat 6 bar"
+
+    got = auth_client.get(f"/api/brews/{created['id']}").json()
+    assert got["setup_name"] == "Office"
+    assert got["machine_profile"] == "Flat 6 bar"
+    listed = auth_client.get("/api/brews/").json()["items"][0]
+    assert listed["setup_name"] == "Office"
+
+
+def test_brew_setup_snapshot_defaults_to_null(auth_client):
+    bean_id = _create_bean(auth_client)
+    brew = auth_client.post("/api/brews/", json=_brew_payload(bean_id)).json()
+    assert brew["setup_name"] is None
+    assert brew["machine_profile"] is None
+
+
+def test_brew_setup_snapshot_blank_becomes_null(auth_client):
+    bean_id = _create_bean(auth_client)
+    brew = auth_client.post(
+        "/api/brews/", json=_brew_payload(bean_id, setup_name="  ", machine_profile="")
+    ).json()
+    assert brew["setup_name"] is None
+    assert brew["machine_profile"] is None
+
+
+def test_brew_update_can_set_and_clear_setup_snapshot(auth_client):
+    bean_id = _create_bean(auth_client)
+    brew = auth_client.post(
+        "/api/brews/",
+        json=_brew_payload(bean_id, setup_name="Office", machine_profile="Flat"),
+    ).json()
+    url = f"/api/brews/{brew['id']}"
+
+    # Omitted -> untouched.
+    resp = auth_client.put(url, json={"rating": 7})
+    assert resp.json()["setup_name"] == "Office"
+
+    # Changed.
+    resp = auth_client.put(url, json={"setup_name": "Home"})
+    assert resp.json()["setup_name"] == "Home"
+    assert resp.json()["machine_profile"] == "Flat"
+
+    # Explicit null clears.
+    resp = auth_client.put(url, json={"setup_name": None, "machine_profile": None})
+    assert resp.status_code == 200
+    assert resp.json()["setup_name"] is None
+    assert resp.json()["machine_profile"] is None
+    assert auth_client.get(url).json()["setup_name"] is None
+
+
+def test_brew_setup_snapshot_length_limits(auth_client):
+    bean_id = _create_bean(auth_client)
+    for field, limit in (("setup_name", 80), ("machine_profile", 120)):
+        ok = auth_client.post(
+            "/api/brews/", json=_brew_payload(bean_id, **{field: "x" * limit})
+        )
+        assert ok.status_code == 201
+        bad = auth_client.post(
+            "/api/brews/", json=_brew_payload(bean_id, **{field: "x" * (limit + 1)})
+        )
+        assert bad.status_code == 422
+        put = auth_client.put(
+            f"/api/brews/{ok.json()['id']}", json={field: "x" * (limit + 1)}
+        )
+        assert put.status_code == 422
+
+
+def test_brew_setup_name_is_not_validated_against_setups(auth_client):
+    """The snapshot is plain text: a name with no matching setup is fine."""
+    bean_id = _create_bean(auth_client)
+    resp = auth_client.post(
+        "/api/brews/", json=_brew_payload(bean_id, setup_name="Deleted Long Ago")
+    )
+    assert resp.status_code == 201
+    assert auth_client.get("/api/setups").json() == []
+
+
+def test_brew_setup_snapshot_survives_setup_rename_and_delete(auth_client):
+    bean_id = _create_bean(auth_client)
+    setup = auth_client.post(
+        "/api/setups", json={"name": "Office", "brew_style": "espresso", "ratio": 2}
+    ).json()
+    brew = auth_client.post(
+        "/api/brews/", json=_brew_payload(bean_id, setup_name=setup["name"])
+    ).json()
+    auth_client.put(f"/api/setups/{setup['id']}", json={"name": "Renamed"})
+    auth_client.delete(f"/api/setups/{setup['id']}")
+    assert auth_client.get(f"/api/brews/{brew['id']}").json()["setup_name"] == "Office"

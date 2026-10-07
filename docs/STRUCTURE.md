@@ -13,7 +13,7 @@ This document describes how the stack is organized for contributors.
 ├── .github/workflows/ci.yml      # CI pipeline
 ├── backend/
 │   ├── src/coffee_journal/       # application source
-│   ├── alembic/versions/         # 9 DB migrations
+│   ├── alembic/versions/         # 14 DB migrations
 │   ├── tests/                    # pytest suites (SQLite in-memory)
 │   ├── requirements.txt
 │   └── pyproject.toml            # ruff + pytest config
@@ -65,9 +65,10 @@ This document describes how the stack is organized for contributors.
 | `User` | `id`, `email`, `display_name`, `token_version`, `created_at`, plus preferences: `temperature_unit`, `grinders` (JSON), `preferred_grinder` |
 | `MagicLinkToken` | `email`, `token_hash`, `expires_at`, `used` |
 | `Bean` | `user_id`, `name`, `roaster`, `origin`, `process`, `roast_level`, `elevation_m`, `notes` |
-| `Brew` | `user_id`, `bean_id`, `date`, `bean_weight_g`, `water_weight_g`, `brew_style`, `grinder_name`, `grind_setting`, `grind_setting_notes`, `water_temp_c`, `bloom_time_s`, `total_brew_time_s`, `agitation_events`, `tasting_notes`, `flavor_tags`, `aroma_tags`, `rating`, `aroma_rating`, `flavor_rating` |
+| `Brew` | `user_id`, `bean_id`, `date`, `bean_weight_g`, `water_weight_g`, `brew_style`, `grinder_name`, `grind_setting`, `grind_setting_notes`, `setup_name`, `machine_profile` (plain-text snapshots, no FK), `water_temp_c`, `bloom_time_s`, `total_brew_time_s`, `agitation_events`, `tasting_notes`, `flavor_tags`, `aroma_tags`, `rating`, `aroma_rating`, `flavor_rating` |
+| `BrewSetup` | `user_id`, `name` (unique per user, case-insensitive), `brew_style`, `ratio`, `dose_g`, `grinder_name`, `target_time_s`, `machine_profile` — no grind: that is prefilled from past brews (`GET /api/brews/last-grind`) |
 
-All user-owned data (`Bean`, `Brew`) has a `user_id` FK; every CRUD query filters by it.
+All user-owned data (`Bean`, `Brew`, `BrewSetup`) has a `user_id` FK; every CRUD query filters by it.
 
 Preference columns are nullable on purpose: `NULL` means "never set on the server", which
 the client reads as "keep my local defaults". That is distinct from "set to empty", and is
@@ -119,10 +120,11 @@ Input limits enforced at the Pydantic layer:
 |---|---|---|
 | `auth.py` | `/api/auth` | `/magic-link`: 5/min |
 | `beans.py` | `/api/beans` | `POST /`: 30/min |
-| `brews.py` | `/api/brews` | `POST /`: 30/min |
+| `brews.py` | `/api/brews` | `POST /`: 30/min. `GET /last-grind?bean_id=&grinder_name=` (declared before `/{brew_id}`): the grind of the user's newest brew of that bean on that grinder, or a `null` body |
 | `data.py` | `/api` | `GET /export`: 10/min; `POST /import`: 5/min |
 | `metrics.py` | `/api/metrics` | — |
 | `preferences.py` | `/api/preferences` | `PUT`: 30/min |
+| `setups.py` | `/api/setups` | `POST`, `PATCH`, `DELETE`: 30/min |
 
 ### Migrations — `alembic/versions/`
 | Revision | Change |
@@ -138,6 +140,9 @@ Input limits enforced at the Pydantic layer:
 | `20260325_09` | Add `token_version` to users (session revocation) |
 | `20260906_10` | Store `sha256(token)` instead of the raw token; rename `token` → `token_hash` |
 | `20260909_11` | Add preference columns to users (moved off browser localStorage) |
+| `20261007_12` | Add `brew_setups` table (case-insensitive unique name per user) |
+| `20261007_13` | Add `setup_name` + `machine_profile` snapshot columns to `brews` |
+| `20261007_14` | Drop `brew_setups.grind_setting` (grind is prefilled from past brews instead) |
 
 ### Tests — `tests/`
 103 tests across:
@@ -149,6 +154,8 @@ Input limits enforced at the Pydantic layer:
 - `test_config.py` — production guard behavior + `DATABASE_URL` driver normalisation
 - `test_data.py` — backup/restore round trip, id-collision and idempotency regressions
 - `test_preferences.py` — per-user preference storage and isolation
+- `test_setups.py` — setup CRUD, validation, name uniqueness, tenancy
+- `test_last_grind.py` — `GET /api/brews/last-grind` matching, ordering, isolation
 - `test_metrics.py` — metrics endpoint
 - `test_validation.py` — schema input limits
 

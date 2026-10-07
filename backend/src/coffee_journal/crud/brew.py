@@ -45,6 +45,35 @@ def list_brews(
     return items, total
 
 
+def last_grind(
+    db: Session, user_id: str, bean_id: str, grinder_name: str
+) -> Brew | None:
+    """The user's newest brew of ``bean_id`` on ``grinder_name`` that recorded a grind.
+
+    The grinder is compared case-insensitively and trimmed, on both sides, because
+    the name is free text typed on the log form ("niche zero" vs "Niche Zero ").
+    Brews with a null or blank grind are skipped, so a brew logged without one
+    never hides an earlier brew that had one. Newest = brew date, then created_at.
+    """
+    wanted = grinder_name.strip().lower()
+    if not wanted:
+        return None
+    stmt = (
+        select(Brew)
+        .where(
+            Brew.user_id == user_id,
+            Brew.bean_id == bean_id,
+            func.lower(func.trim(Brew.grinder_name)) == wanted,
+            Brew.grind_setting.is_not(None),
+        )
+        .order_by(Brew.date.desc(), Brew.created_at.desc())
+    )
+    # Blankness is decided here, not in SQL: SQL trim() strips spaces only, so a
+    # grind of "\t" would pass it, win the ordering, and hide an older brew that
+    # did record a grind. One bean on one grinder is a short list.
+    return next((b for b in db.scalars(stmt) if b.grind_setting.strip()), None)
+
+
 def get_brew(db: Session, brew_id: str, user_id: str) -> Brew | None:
     brew = db.get(Brew, brew_id)
     if brew and brew.user_id != user_id:
@@ -62,7 +91,8 @@ def create_brew(db: Session, data: dict) -> Brew:
 
 _BREW_MUTABLE_FIELDS = frozenset({
     "date", "bean_id", "bean_weight_g", "water_weight_g", "brew_style",
-    "grind_setting", "grind_setting_notes", "grinder_name", "water_temp_c",
+    "grind_setting", "grind_setting_notes", "grinder_name", "setup_name",
+    "machine_profile", "water_temp_c",
     "bloom_time_s", "total_brew_time_s", "agitation_events", "tasting_notes",
     "flavor_tags", "aroma_tags", "rating", "aroma_rating", "flavor_rating",
 })

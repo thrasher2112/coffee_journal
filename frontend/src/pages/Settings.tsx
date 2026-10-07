@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ExportImportModal } from '../components/ExportImportModal';
+import { SetupsSection } from '../components/SetupsSection';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
 import { exportData, importData, NetworkError } from '../lib/api';
@@ -20,7 +21,7 @@ export function SettingsPage() {
   /**
    * Download a complete backup.
    *
-   * Everything the account holds server-side (beans, brews, preferences) plus
+   * Everything the account holds server-side (beans, brews, setups, preferences) plus
    * any brews still queued on this device, so nothing is missed if the backup
    * is taken before a sync. This used to write out only the offline queue,
    * which meant a "backup" contained none of the journal.
@@ -30,10 +31,12 @@ export function SettingsPage() {
     try {
       const server = await exportData();
       const backup = {
-        version: 1 as const,
+        // v2 added `setups`. v1 files (no setups) still restore.
+        version: 2 as const,
         exported_at: new Date().toISOString(),
         beans: server.beans,
         brews: server.brews,
+        setups: server.setups ?? [],
         preferences: server.preferences,
         // Unsynced drafts live only on this device until they reach the server.
         localBrews: unsynced
@@ -47,9 +50,11 @@ export function SettingsPage() {
       link.click();
       URL.revokeObjectURL(url);
 
+      const setupCount = backup.setups.length;
       setStatus(
-        `Backed up ${server.beans.length} bean${server.beans.length === 1 ? '' : 's'} and ` +
-          `${server.brews.length} brew${server.brews.length === 1 ? '' : 's'}` +
+        `Backed up ${server.beans.length} bean${server.beans.length === 1 ? '' : 's'}, ` +
+          `${server.brews.length} brew${server.brews.length === 1 ? '' : 's'} and ` +
+          `${setupCount} setup${setupCount === 1 ? '' : 's'}` +
           (unsynced.length ? `, plus ${unsynced.length} unsynced.` : '.')
       );
     } catch (err) {
@@ -61,11 +66,12 @@ export function SettingsPage() {
     }
   };
 
-  /** Restore a backup file: beans, brews and preferences go back to the server. */
+  /** Restore a backup file: beans, brews, setups and preferences go back to the server. */
   const handleImport = async (payload: unknown) => {
     const file = payload as {
       beans?: unknown;
       brews?: unknown;
+      setups?: unknown;
       preferences?: unknown;
       localBrews?: unknown;
     } | null;
@@ -77,9 +83,11 @@ export function SettingsPage() {
 
     setStatus('Restoring...');
     try {
-      await importData({
+      const result = await importData({
         beans: Array.isArray(file.beans) ? file.beans : [],
         brews: Array.isArray(file.brews) ? file.brews : [],
+        // Version-1 files have no setups; leave the key out rather than send [].
+        ...(Array.isArray(file.setups) ? { setups: file.setups } : {}),
         preferences: file.preferences ?? undefined
       });
 
@@ -91,9 +99,30 @@ export function SettingsPage() {
 
       const beanCount = Array.isArray(file.beans) ? file.beans.length : 0;
       const brewCount = Array.isArray(file.brews) ? file.brews.length : 0;
+      // A restore never overwrites a setup that already exists by name, so say
+      // how many were left alone.
+      const setupsRestored = result?.counts?.setups ?? 0;
+      const setupsSkipped = result?.counts?.setups_skipped ?? 0;
+      const setupsInFile = Array.isArray(file.setups) ? file.setups.length : 0;
+      const parts = [
+        `${beanCount} bean${beanCount === 1 ? '' : 's'}`,
+        `${brewCount} brew${brewCount === 1 ? '' : 's'}`
+      ];
+      // An older server ignores the `setups` key and reports no setup count;
+      // saying "0 setups restored" there would read as a clean restore.
+      const setupsUnsupported = setupsInFile > 0 && result?.counts?.setups === undefined;
+      if (!setupsUnsupported && (setupsInFile || setupsRestored || setupsSkipped)) {
+        parts.push(`${setupsRestored} setup${setupsRestored === 1 ? '' : 's'}`);
+      }
+      const skippedNote = setupsUnsupported
+        ? ' Setups were not restored because the server does not support them.'
+        : setupsSkipped
+        ? ` ${setupsSkipped} setup${setupsSkipped === 1 ? '' : 's'} already existed and ` +
+          `${setupsSkipped === 1 ? 'was' : 'were'} kept as-is.`
+        : '';
       setStatus(
-        `Restored ${beanCount} bean${beanCount === 1 ? '' : 's'} and ` +
-          `${brewCount} brew${brewCount === 1 ? '' : 's'}. Open the journal to see them.`
+        `Restored ${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}.` +
+          `${skippedNote} Open the journal to see them.`
       );
       setModalOpen(false);
     } catch (err) {
@@ -236,6 +265,7 @@ export function SettingsPage() {
           })}
         </ul>
       </section>
+      <SetupsSection />
       <section className="journal-card space-y-4 p-6">
         <div>
           <h2 className="text-2xl font-display text-espresso">Account</h2>

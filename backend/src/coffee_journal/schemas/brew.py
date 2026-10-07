@@ -5,6 +5,10 @@ import datetime as dt
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Imported at the top because BrewBase's field annotations need these at class
+# creation time (the bean/user imports below are only needed lazily).
+from .setup import OptionalText80, OptionalText120, SetupImport, SetupRead
+
 
 class AgitationEvent(BaseModel):
     timestamp_s: int
@@ -27,6 +31,9 @@ class BrewBase(BaseModel):
     grind_setting: str | None = Field(None, max_length=120)
     grind_setting_notes: str | None = Field(None, max_length=2000)
     grinder_name: str | None = Field(None, max_length=120)
+    # Free-text snapshots, deliberately not checked against brew_setups.
+    setup_name: OptionalText80 = None
+    machine_profile: OptionalText120 = None
     water_temp_c: int | None = Field(None)
     bloom_time_s: int | None = Field(None)
     total_brew_time_s: int | None = Field(None)
@@ -43,6 +50,16 @@ class BrewBase(BaseModel):
         return _dedupe_tags(value)
 
 
+class LastGrind(BaseModel):
+    """Answer to GET /api/brews/last-grind: the grind of the newest matching brew."""
+
+    grind_setting: str
+    date: dt.date
+    # When the brew was logged: the tiebreak against same-day brews that are
+    # still queued on the client (it has no other way to order them).
+    created_at: dt.datetime
+
+
 class BrewCreate(BrewBase):
     pass
 
@@ -56,6 +73,9 @@ class BrewUpdate(BaseModel):
     grind_setting: str | None = Field(None, max_length=120)
     grind_setting_notes: str | None = Field(None, max_length=2000)
     grinder_name: str | None = Field(None, max_length=120)
+    # Free-text snapshots, deliberately not checked against brew_setups.
+    setup_name: OptionalText80 = None
+    machine_profile: OptionalText120 = None
     water_temp_c: int | None = Field(None)
     bloom_time_s: int | None = Field(None)
     total_brew_time_s: int | None = Field(None)
@@ -98,6 +118,7 @@ class ExportPayload(BaseModel):
     # Preferences live on the account now, so a backup that omitted them would
     # not actually restore everything.
     preferences: PreferencesRead | None = None
+    setups: list[SetupRead] = Field(default_factory=list)
 
 
 class ImportPayload(BaseModel):
@@ -106,6 +127,8 @@ class ImportPayload(BaseModel):
     # Optional so older backup files, written before preferences were stored
     # server-side, still import cleanly.
     preferences: PreferencesUpdate | None = None
+    # Optional so version-1 backups, written before setups existed, still import.
+    setups: list[SetupImport] = Field(default_factory=list, max_length=1000)
 
 
 class BrewImport(BrewCreate):

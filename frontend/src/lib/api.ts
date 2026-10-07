@@ -1,4 +1,14 @@
-import type { Bean, Brew, BrewDraft, MetricsOverview, User } from '../types';
+import type {
+  Bean,
+  Brew,
+  BrewDraft,
+  BrewSetup,
+  BrewSetupInput,
+  BrewSetupUpdate,
+  LastGrind,
+  MetricsOverview,
+  User
+} from '../types';
 
 // Empty string = same-origin. Every path below already starts with `/api`, so an
 // empty base produces a relative request that follows whatever host the app was
@@ -29,6 +39,16 @@ export class NetworkError extends Error {
   }
 }
 
+/** The API answered and rejected the request. `status` is the HTTP status. */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`Request failed: ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -47,7 +67,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new AuthError();
   }
   if (!res.ok) {
-    throw new Error(`Request failed: ${res.status}`);
+    throw new ApiError(res.status);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -144,6 +164,44 @@ export async function createBrew(brew: BrewDraft): Promise<Brew> {
   });
 }
 
+// ---- Setups ----
+// No trailing slash: the API 307-redirects /api/setups/ and a redirected POST
+// is not guaranteed to keep its body.
+
+/**
+ * The grind the user last used for this bean on this grinder, or null when
+ * there is none (the API answers 200 with a null body). The grinder is matched
+ * case-insensitively and trimmed server-side.
+ */
+export async function fetchLastGrind(beanId: string, grinderName: string): Promise<LastGrind | null> {
+  const params = new URLSearchParams({ bean_id: beanId, grinder_name: grinderName });
+  return request<LastGrind | null>(`/api/brews/last-grind?${params.toString()}`);
+}
+
+export async function fetchSetups(): Promise<BrewSetup[]> {
+  return request<BrewSetup[]>(`/api/setups`);
+}
+
+export async function createSetup(setup: BrewSetupInput): Promise<BrewSetup> {
+  return request<BrewSetup>(`/api/setups`, {
+    method: 'POST',
+    body: JSON.stringify(setup)
+  });
+}
+
+export async function updateSetup(setupId: string, changes: BrewSetupUpdate): Promise<BrewSetup> {
+  return request<BrewSetup>(`/api/setups/${encodeURIComponent(setupId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(changes)
+  });
+}
+
+export async function deleteSetup(setupId: string): Promise<void> {
+  return request<void>(`/api/setups/${encodeURIComponent(setupId)}`, {
+    method: 'DELETE'
+  });
+}
+
 // ---- Metrics ----
 
 export async function fetchMetrics(): Promise<MetricsOverview> {
@@ -179,14 +237,27 @@ export interface ServerExport {
   beans: Bean[];
   brews: Brew[];
   preferences: ServerPreferences | null;
+  // Absent when talking to a server that predates brew setups.
+  setups?: BrewSetup[];
+}
+
+/** What the server did with a restore. Setup counts are absent on older servers. */
+export interface ImportResult {
+  status: string;
+  counts: {
+    beans: number;
+    brews: number;
+    setups?: number;
+    setups_skipped?: number;
+  };
 }
 
 export async function exportData(): Promise<ServerExport> {
   return request<ServerExport>(`/api/export`);
 }
 
-export async function importData(payload: unknown) {
-  return request(`/api/import`, {
+export async function importData(payload: unknown): Promise<ImportResult> {
+  return request<ImportResult>(`/api/import`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import logging
+import math
 import mimetypes
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -72,6 +75,29 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _finite_only(value):
+    """Replace NaN/Infinity (not valid JSON) so an error body can be serialised."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _finite_only(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_only(v) for v in value]
+    return value
+
+
+# Exists because FastAPI's default 422 body cannot serialise a NaN/Infinity input.
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    # Same body as FastAPI's default handler, except that it survives a client
+    # sending NaN/Infinity: the default echoes the offending input back, and the
+    # JSON encoder then raises on it, turning a 422 into a 500.
+    return JSONResponse(
+        status_code=422,
+        content={"detail": jsonable_encoder(_finite_only(exc.errors()))},
+    )
 
 # CORS: tighten for production, permissive in debug mode
 allowed_origins: set[str | None] = set()
