@@ -13,6 +13,12 @@ const mockSetPreferredGrinder = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({ fetchLastGrind: vi.fn() }));
 vi.mock('../../lib/api', () => api);
 
+// The offline queue of not-yet-synced brews, as useLocalBrewStore exposes it.
+const mockLocal = vi.hoisted(() => ({ unsynced: [] as Record<string, unknown>[] }));
+vi.mock('../../hooks/useLocalBrewStore', () => ({
+  useLocalBrewStore: () => ({ brews: mockLocal.unsynced, unsynced: mockLocal.unsynced, addBrew: vi.fn() }),
+}));
+
 const mockPrefs = vi.hoisted(() => ({
   temperatureUnit: 'celsius' as 'celsius' | 'fahrenheit',
   grinders: [] as string[],
@@ -34,6 +40,7 @@ beforeEach(() => {
   localStorage.clear();
   api.fetchLastGrind.mockReset();
   api.fetchLastGrind.mockResolvedValue(null);
+  mockLocal.unsynced = [];
   mockSetPreferredGrinder.mockClear();
   mockPrefs.temperatureUnit = 'celsius';
   mockPrefs.grinders = [];
@@ -1389,12 +1396,54 @@ describe('QuickLogBar grind prefill', () => {
     );
   });
 
-  it('shows no grind field or hint in the quick form (it is an advanced field)', async () => {
-    api.fetchLastGrind.mockResolvedValue(found('14'));
-    renderPrefill({ variant: 'quick' });
-    await act(async () => {});
-    expect(screen.queryByLabelText('Grind setting')).not.toBeInTheDocument();
-    expect(screen.queryByText(/^from your/)).not.toBeInTheDocument();
+  describe('quick form', () => {
+    const quickGrind = () => screen.queryByLabelText('Grind setting') as HTMLInputElement | null;
+
+    it('shows no grind field while there is no grind and no prefill', async () => {
+      renderPrefill({ variant: 'quick' });
+      await act(async () => {});
+      expect(quickGrind()).not.toBeInTheDocument();
+    });
+
+    it('shows an editable grind field with the hint when a grind was prefilled', async () => {
+      api.fetchLastGrind.mockResolvedValue(found('14'));
+      renderPrefill({ variant: 'quick' });
+      await waitFor(() => expect(quickGrind()?.value).toBe('14'));
+      expect(hint()).toBeInTheDocument();
+      expect(quickGrind()).toHaveAttribute('aria-describedby', hint()!.id);
+    });
+
+    it('saves the grind as edited there, not the prefill', async () => {
+      api.fetchLastGrind.mockResolvedValue(found('14'));
+      const onSave = vi.fn();
+      renderPrefill({ variant: 'quick', onSave });
+      await waitFor(() => expect(quickGrind()?.value).toBe('14'));
+      fireEvent.change(quickGrind()!, { target: { value: '16' } });
+      expect(hint()).not.toBeInTheDocument();
+      await clickSave('Save quick brew');
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ grind_setting: '16' }));
+    });
+
+    it('stays on screen once shown, even when the grind is cleared', async () => {
+      api.fetchLastGrind.mockResolvedValue(found('14'));
+      renderPrefill({ variant: 'quick' });
+      await waitFor(() => expect(quickGrind()?.value).toBe('14'));
+      fireEvent.change(quickGrind()!, { target: { value: '' } });
+      expect(quickGrind()).toBeInTheDocument();
+    });
+
+    it('shows a grind the incoming draft carries', () => {
+      renderPrefill({ variant: 'quick', initialDraft: { ...baseDraft, grinder_name: 'Niche', grind_setting: '20' } });
+      expect(quickGrind()?.value).toBe('20');
+    });
+
+    it('a fresh draft hides it again until the next prefill', async () => {
+      api.fetchLastGrind.mockResolvedValueOnce(found('14')).mockResolvedValue(null);
+      renderPrefill({ variant: 'quick', onSave: vi.fn().mockResolvedValue(undefined) });
+      await waitFor(() => expect(quickGrind()?.value).toBe('14'));
+      await clickSave('Save quick brew');
+      await waitFor(() => expect(quickGrind()).not.toBeInTheDocument());
+    });
   });
 
   it('after a save the fresh draft looks the grind up again, same bean and grinder', async () => {
@@ -1518,6 +1567,125 @@ describe('QuickLogBar grind prefill', () => {
       await act(async () => {});
       expect(api.fetchLastGrind).not.toHaveBeenCalled();
       expect(grindInput().value).toBe('20');
+    });
+  });
+
+  describe('offline queue', () => {
+    const queued = (over: Record<string, unknown> = {}) => ({
+      local_id: 'l1',
+      synced: false,
+      created_at: '2026-10-05T10:00:00.000Z',
+      date: '2026-10-05',
+      bean_id: 'bean-1',
+      grinder_name: 'niche ',
+      grind_setting: '15',
+      bean_weight_g: 18,
+      water_weight_g: 288,
+      agitation_events: [],
+      flavor_tags: [],
+      ...over,
+    });
+    const serverBrew = (over = {}) => ({
+      grind_setting: '14',
+      date: '2026-10-05',
+      created_at: '2026-10-05T09:00:00.000Z',
+      ...over,
+    });
+
+    it('a newer queued brew beats the server answer', async () => {
+      mockLocal.unsynced = [queued()];
+      api.fetchLastGrind.mockResolvedValue(serverBrew());
+      renderPrefill();
+      await waitFor(() => expect(grindInput().value).toBe('15'));
+      await act(async () => {});
+      expect(grindInput().value).toBe('15');
+    });
+
+    it('a newer server brew beats the queue', async () => {
+      mockLocal.unsynced = [queued()];
+      api.fetchLastGrind.mockResolvedValue(serverBrew({ date: '2026-10-06', created_at: '2026-10-06T07:00:00Z' }));
+      renderPrefill();
+      await waitFor(() => expect(grindInput().value).toBe('14'));
+      expect(hint('2026-10-06')).toBeInTheDocument();
+    });
+
+    it('offline: the queue still suggests a grind', async () => {
+      mockLocal.unsynced = [queued()];
+      api.fetchLastGrind.mockRejectedValue(new TypeError('offline'));
+      renderPrefill();
+      await waitFor(() => expect(grindInput().value).toBe('15'));
+      expect(hint('2026-10-05')).toBeInTheDocument();
+    });
+
+    it('queued brews of another bean, another grinder, or already synced are ignored', async () => {
+      mockLocal.unsynced = [
+        queued({ bean_id: 'bean-2' }),
+        queued({ grinder_name: 'Comandante' }),
+        queued({ synced: true }),
+      ];
+      api.fetchLastGrind.mockResolvedValue(serverBrew());
+      renderPrefill();
+      await waitFor(() => expect(grindInput().value).toBe('14'));
+    });
+
+    it('a bean change consults the queue for the new bean', async () => {
+      mockLocal.unsynced = [queued({ bean_id: 'bean-2', grind_setting: '9' })];
+      api.fetchLastGrind.mockResolvedValue(serverBrew());
+      renderPrefill();
+      await waitFor(() => expect(grindInput().value).toBe('14'));
+      fireEvent.change(beanSelect(), { target: { value: 'bean-2' } });
+      await waitFor(() => expect(grindInput().value).toBe('9'));
+    });
+  });
+
+  describe('grinder changed after a typed grind', () => {
+    const warning = () => screen.queryByText('Grinder changed — check grind setting');
+
+    it('keeps the typed text and warns, tied to the input; typing again clears the warning', async () => {
+      renderPrefill();
+      await act(async () => {});
+      fireEvent.change(grindInput(), { target: { value: '18' } });
+      expect(warning()).not.toBeInTheDocument();
+      fireEvent.change(grinderSelect(), { target: { value: 'Comandante' } });
+      expect(grindInput().value).toBe('18');
+      expect(warning()).toBeInTheDocument();
+      expect(grindInput().getAttribute('aria-describedby')).toContain(warning()!.id);
+      fireEvent.change(grindInput(), { target: { value: '19' } });
+      expect(warning()).not.toBeInTheDocument();
+    });
+
+    it('also fires when a setup apply moves the grinder', async () => {
+      renderPrefill({ setups: [office] });
+      fireEvent.change(grindInput(), { target: { value: '18' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Office · Espresso · 1:3' }));
+      await waitFor(() => expect(warning()).toBeInTheDocument());
+      expect(grindInput().value).toBe('18');
+    });
+
+    it('does not fire for a prefilled grind (it is re-looked-up instead), or with no typed grind', async () => {
+      api.fetchLastGrind.mockResolvedValue(found('14'));
+      renderPrefill();
+      await waitFor(() => expect(grindInput().value).toBe('14'));
+      fireEvent.change(grinderSelect(), { target: { value: 'Comandante' } });
+      await act(async () => {});
+      expect(warning()).not.toBeInTheDocument();
+    });
+
+    it('does not fire when the grinder was empty before (hydration, first pick)', async () => {
+      mockPrefs.preferredGrinder = undefined;
+      renderPrefill();
+      fireEvent.change(grindInput(), { target: { value: '18' } });
+      fireEvent.change(grinderSelect(), { target: { value: 'Comandante' } });
+      expect(warning()).not.toBeInTheDocument();
+    });
+
+    it('Reset clears it', async () => {
+      renderPrefill();
+      fireEvent.change(grindInput(), { target: { value: '18' } });
+      fireEvent.change(grinderSelect(), { target: { value: 'Comandante' } });
+      expect(warning()).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Reset'));
+      expect(warning()).not.toBeInTheDocument();
     });
   });
 

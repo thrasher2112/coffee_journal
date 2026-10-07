@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AromaTag, Bean, BrewDraft, BrewSetup, FlavorTag } from '../types';
 import { fetchLastGrind } from '../lib/api';
+import { useLocalBrewStore } from '../hooks/useLocalBrewStore';
+import { fromServer, localLastGrind, normalizeGrinder, pickSuggestion } from '../lib/lastGrind';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
 import { AromaTags } from './AromaTags';
@@ -59,10 +61,6 @@ const findSetupByName = (setups: BrewSetup[], name: string | null | undefined) =
   const wanted = name?.toLowerCase();
   return wanted ? setups.find((setup) => setup.name.toLowerCase() === wanted) : undefined;
 };
-
-// Grinder names are free text, so "niche zero " and "Niche Zero" are one grinder
-// (the API matches the same way).
-const normalizeGrinder = (name: string | undefined): string => (name ?? '').trim().toLowerCase();
 
 // "3 Oct" from the API's YYYY-MM-DD ("3 Oct 2025" when not this year), built in
 // local time so the day never shifts with the timezone. Anything unparseable
@@ -173,6 +171,17 @@ export function QuickLogBar({
     setPrefillState(next);
   };
   const [draftNonce, setDraftNonce] = useState(0);
+  // The quick form has no grind field by default (it is an advanced field), but
+  // a grind it will save must be visible and editable. So the field appears once
+  // the draft has a grind - prefilled, typed or carried in - and then stays for
+  // that draft, so it cannot vanish under the cursor (as with machine profile).
+  const [grindVisible, setGrindVisible] = useState(!!initialDraft?.grind_setting?.trim());
+  // Set when the grinder changes under a grind the user typed (see the effect).
+  const [grinderWarning, setGrinderWarning] = useState(false);
+  // Brews logged on this device and not yet synced. They can be newer than
+  // anything the server knows, so the grind suggestion considers them too.
+  const { unsynced } = useLocalBrewStore();
+  const unsyncedRef = useRef(unsynced);
   // Latest form, for the lookup's stale check when its response arrives.
   const formRef = useRef(form);
 
@@ -208,6 +217,7 @@ export function QuickLogBar({
 
   useEffect(() => {
     formRef.current = form;
+    unsyncedRef.current = unsynced;
   });
 
   // Prefill the grind from the last brew of this bean on this grinder. Keyed on
@@ -217,6 +227,21 @@ export function QuickLogBar({
   // style/yield defaults, which are explicit transitions.
   const lookupBeanId = form.bean_id;
   const lookupKey = normalizeGrinder(form.grinder_name);
+
+  // Swapping the grinder under a grind the user typed or brought with the draft
+  // leaves the text alone (it may well still be right) but flags it: grind
+  // settings do not carry between grinders. A prefilled grind is not decided
+  // and is re-looked-up instead; coming from no grinder at all is a first
+  // choice, not a swap.
+  const previousGrinderKey = useRef(lookupKey);
+  useEffect(() => {
+    const previous = previousGrinderKey.current;
+    previousGrinderKey.current = lookupKey;
+    if (previous && previous !== lookupKey && grindDecided.current && formRef.current.grind_setting?.trim()) {
+      setGrinderWarning(true);
+    }
+  }, [lookupKey]);
+
   useEffect(() => {
     if (grindDecided.current) return;
     // A prefill carried in from the quick form already answers for this very
@@ -235,11 +260,20 @@ export function QuickLogBar({
     // Set by cleanup: the key changed, a fresh draft began, or the component
     // unmounted (or StrictMode's dev-only double mount) - the response is stale.
     let cancelled = false;
+    // Queued offline brews count too: a newer one there beats the server's
+    // answer, and it is the only source when the server cannot be reached.
+    const queued = localLastGrind(unsyncedRef.current, lookupBeanId, lookupKey);
     // The grinder as typed, trimmed; the API matches it case-insensitively.
     fetchLastGrind(lookupBeanId, formRef.current.grinder_name?.trim() ?? '')
-      .then((result) => {
-        const grind = result?.grind_setting?.trim();
-        if (cancelled || grindDecided.current || !result || !grind) return;
+      .then(
+        (result) => (result?.grind_setting?.trim() ? fromServer(result) : null),
+        // Offline or failing: no server answer; a queued brew may still help.
+        () => null
+      )
+      .then((server) => {
+        const suggestion = pickSuggestion(queued, server);
+        if (cancelled || grindDecided.current || !suggestion) return;
+        const grind = suggestion.grind;
         // Belt and braces: the `cancelled` flag already covers a changed key;
         // this re-checks the live form in case a path changes it without
         // re-running the effect.
@@ -254,9 +288,10 @@ export function QuickLogBar({
         // Raw setForm, not update(): a prefill is not a user edit, so it must
         // not block the last-used setup auto-apply.
         setForm((prev) => ({ ...prev, grind_setting: grind }));
-        setPrefill({ grind, date: result.date, key: lookupKeyOf(lookupBeanId, lookupKey) });
+        setPrefill({ grind, date: suggestion.date, key: lookupKeyOf(lookupBeanId, lookupKey) });
+        setGrindVisible(true);
       })
-      // Offline or failing: no suggestion. The form never waits on this.
+      // Whatever goes wrong, the form never waits on or breaks because of this.
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -351,6 +386,8 @@ export function QuickLogBar({
     // are unchanged (after a save, the brew just saved is now the newest).
     grindDecided.current = false;
     setPrefill(null);
+    setGrindVisible(false);
+    setGrinderWarning(false);
     setDraftNonce((n) => n + 1);
     if (setup) draft = applySetup(draft, setup, { advanced: isAdvanced });
     setForm(draft);
@@ -535,8 +572,40 @@ export function QuickLogBar({
   const handleGrindChange = (value: string) => {
     grindDecided.current = true;
     setPrefill(null);
+    setGrinderWarning(false);
+    setGrindVisible(true);
     update('grind_setting', value);
   };
+
+  // The hint and the warning are descriptions of the input, not part of its name.
+  const grindDescription =
+    [prefill ? 'grind-prefill-hint' : null, grinderWarning ? 'grind-warning' : null].filter(Boolean).join(' ') ||
+    undefined;
+  const grindField = (
+    <div className="flex flex-col gap-1 text-sm">
+      <label className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
+        <input
+          type="text"
+          value={form.grind_setting ?? ''}
+          placeholder="e.g., 18, 7.5, 24 clicks"
+          aria-describedby={grindDescription}
+          onChange={(event) => handleGrindChange(event.target.value)}
+          className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
+        />
+      </label>
+      {prefill && (
+        <p id="grind-prefill-hint" className="text-xs text-moss">
+          from your {formatBrewDate(prefill.date)} brew
+        </p>
+      )}
+      {grinderWarning && (
+        <p id="grind-warning" className="text-xs text-ember">
+          Grinder changed — check grind setting
+        </p>
+      )}
+    </div>
+  );
 
   const handleGrinderSelect = (value: string) => {
     grinderDecided.current = true;
@@ -690,6 +759,7 @@ export function QuickLogBar({
         </div>
 
         {!isAdvanced && form.machine_profile !== undefined && machineProfileField}
+        {!isAdvanced && grindVisible && grindField}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="flex flex-col gap-4 text-sm">
@@ -783,25 +853,7 @@ export function QuickLogBar({
                   {extraGrinder && <option value={extraGrinder}>{extraGrinder}</option>}
                 </select>
               </label>
-              <div className="flex flex-col gap-1 text-sm">
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
-                  <input
-                    type="text"
-                    value={form.grind_setting ?? ''}
-                    placeholder="e.g., 18, 7.5, 24 clicks"
-                    aria-describedby={prefill ? 'grind-prefill-hint' : undefined}
-                    onChange={(event) => handleGrindChange(event.target.value)}
-                    className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
-                  />
-                </label>
-                {/* Outside the label so it is a description, not part of the input's name. */}
-                {prefill && (
-                  <p id="grind-prefill-hint" className="text-xs text-moss">
-                    from your {formatBrewDate(prefill.date)} brew
-                  </p>
-                )}
-              </div>
+              {grindField}
               {machineProfileField}
             </div>
             <div className="space-y-4">

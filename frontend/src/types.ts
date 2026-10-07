@@ -103,6 +103,8 @@ export type BrewSetupUpdate = Partial<BrewSetupInput>;
 export interface LastGrind {
   grind_setting: string;
   date: string;
+  // When the brew was logged (ISO timestamp); orders same-day brews.
+  created_at?: string;
 }
 
 export interface AgitationEvent {

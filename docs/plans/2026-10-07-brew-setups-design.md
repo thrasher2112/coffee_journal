@@ -90,7 +90,7 @@ Grind prefill lives on the brews router, declared before `/{brew_id}`:
 - `GET /api/brews/last-grind?bean_id=&grinder_name=` — the caller's newest brew
   of that bean whose `grinder_name` matches case-insensitively and trimmed and
   whose `grind_setting` is non-blank (order: brew `date`, then `created_at`).
-  200 `{grind_setting, date}` (the brew's date), or 200 with a JSON `null` body
+  200 `{grind_setting, date, created_at}` (the brew's date and log time), or 200 with a JSON `null` body
   when there is none - including another user's or an unknown bean id, so
   nothing leaks and "no suggestion" is not an error. Both params required
   (`bean_id` ≤ 36, `grinder_name` ≤ 120, else 422). Authenticated, user-scoped.
@@ -143,10 +143,21 @@ explicit transitions:
   Reset/save clear the flag. A response is applied only if bean and normalised
   grinder still match the request and the grind is still undecided. If the bean
   or grinder changes after a *prefilled* grind, that grind is cleared at once
-  and looked up again; no result leaves it empty. Offline or failing: silently
-  no prefill, the form never waits. The grind input (and so the hint) is an
-  advanced-form field; the quick form prefills the value invisibly, like the
-  preferred grinder. Navigating quick -> full
+  and looked up again; no result leaves it empty. Brews still waiting in the offline
+  queue (`useLocalBrewStore`, unsynced, same bean and normalised grinder,
+  non-blank grind) are candidates too: the newer of queue vs server wins, by
+  brew date then `created_at` (the server sends it for this; with no timestamp
+  to compare on the same day the queued brew wins, since it was logged on this
+  device and the server has not seen it). Offline, a queue match alone is
+  suggested. The queue is not account-scoped (known, tracked in another epic),
+  but bean ids are per-user UUIDs, so matching on bean id cannot surface another
+  account's grind. If the grinder changes under a grind the user typed (or the
+  draft brought), the text is kept and a "Grinder changed — check grind
+  setting" warning is shown beside the input until they type again. Otherwise,
+  offline or failing: silently no prefill, the form never waits. The grind input (and so the hint) is an
+  advanced-form field, but the quick form shows it (editable, with the hint) as
+  soon as the draft has a grind - prefilled, typed or carried in - and keeps it
+  for that draft, so a saved grind is never invisible. Reset/save hide it again. Navigating quick -> full
   passes the prefill (value + date) in the router state next to the draft, so the
   full form keeps the hint and still treats the grind as a suggestion, with no
   refetch. The hint adds the year when the brew is not from the current year.
@@ -217,6 +228,15 @@ Frontend (vitest):
 - `applySetup` leaves the grind alone.
 - Settings: create/edit/delete, 409 message.
 - BrewCard renders setup name / profile; unknown style doesn't crash.
+
+## Deploy and rollback
+
+Migrations 12-14 are additive except 14, which drops `brew_setups.grind_setting`
+(its values are discarded). To roll back past migration 14, downgrade with the
+**new** image first (`alembic downgrade 20261007_13`, which re-adds the column,
+empty), and only then start an older image: an older image would otherwise find
+a database revision it does not know. Rolling back further (13, 12) follows the
+same rule - downgrade with the image that has those revisions, then switch.
 
 ## Out of scope
 
