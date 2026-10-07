@@ -7,7 +7,17 @@ import { AromaTags } from './AromaTags';
 import { MinSecInput } from './MinSecInput';
 import { usePreferences } from '../contexts/PreferencesContext';
 import type { TemperatureUnit } from '../contexts/PreferencesContext';
-import { BREW_STYLE_PRESETS, type BrewStyle } from '../lib/brewStyles';
+import { BREW_STYLE_PRESETS, getBrewStylePreset, isBrewStyle } from '../lib/brewStyles';
+import {
+  DEFAULT_STYLE,
+  applyStyle,
+  makeDraft,
+  roundYield,
+  withAdvancedDefaults,
+  type DraftForm,
+} from '../lib/brewDraft';
+
+export type { DraftForm };
 
 interface Props {
   beans: Bean[];
@@ -26,51 +36,6 @@ interface Props {
   initialDraft?: DraftForm;
 }
 
-const DEFAULT_WATER_TEMP = 96;
-const DEFAULT_BLOOM_TIME = 45;
-const DEFAULT_BREW_TIME = 180;
-// Omit the numeric fields that allow a blank ('') input state before
-// re-adding them below — intersecting BrewDraft's plain `number` types
-// directly with a `number | ''` union would collapse back to `number`
-// (the empty-string member has no overlap with BrewDraft's type), silently
-// losing the "blank input" case these form fields rely on.
-export type DraftForm = Omit<
-  BrewDraft,
-  'bean_weight_g' | 'water_weight_g' | 'water_temp_c' | 'bloom_time_s' | 'total_brew_time_s'
-> & {
-  bean_weight_g: number | '';
-  water_weight_g: number | '';
-  water_temp_c?: number | '';
-  bloom_time_s?: number | '';
-  total_brew_time_s?: number | '';
-};
-
-const DEFAULT_BEAN_WEIGHT_G = 18;
-
-const makeDraft = (beanId?: string, brewStyle: BrewStyle = 'pour-over', grinder?: string): DraftForm => ({
-  bean_id: beanId,
-  bean_weight_g: DEFAULT_BEAN_WEIGHT_G,
-  water_weight_g: Number((DEFAULT_BEAN_WEIGHT_G * BREW_STYLE_PRESETS[brewStyle].ratios[0]).toFixed(1)),
-  brew_style: brewStyle,
-  date: new Date().toISOString().slice(0, 10),
-  agitation_events: [],
-  flavor_tags: [],
-  aroma_tags: [],
-  tasting_notes: '',
-  rating: 8,
-  aroma_rating: 8,
-  flavor_rating: 8,
-  grinder_name: grinder,
-  grind_setting: ''
-});
-
-const withAdvancedDefaults = (draft: DraftForm): DraftForm => ({
-  ...draft,
-  water_temp_c: draft.water_temp_c ?? DEFAULT_WATER_TEMP,
-  bloom_time_s: draft.bloom_time_s ?? DEFAULT_BLOOM_TIME,
-  total_brew_time_s: draft.total_brew_time_s ?? DEFAULT_BREW_TIME
-});
-
 const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
   if (celsius === '' || celsius === undefined) return '';
   if (typeof celsius !== 'number' || Number.isNaN(celsius)) return '';
@@ -80,76 +45,80 @@ const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) 
 export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', initialDraft }: Props) {
   const { preferences, setPreferredGrinder } = usePreferences();
   const [isAdvanced, setIsAdvanced] = useState(variant === 'full');
-  const [brewStyle, setBrewStyle] = useState<BrewStyle>(
-    () => (initialDraft?.brew_style as BrewStyle | undefined) ?? 'pour-over'
+  // form.brew_style is the single source of truth for the style. State
+  // changes are explicit transitions (applyStyle, makeDraft, ...) applied via
+  // setForm; there is deliberately no effect reacting to brew_style or yield,
+  // so a programmatic style + yield change is never clobbered by a default.
+  const [form, setForm] = useState<DraftForm>(() => {
+    if (initialDraft) {
+      // The incoming draft wins over defaults; the full form only fills the
+      // advanced fields it left unset.
+      const draft = { ...initialDraft, brew_style: initialDraft.brew_style || DEFAULT_STYLE };
+      return variant === 'full' ? withAdvancedDefaults(draft) : draft;
+    }
+    return makeDraft(defaultBeanId, DEFAULT_STYLE, preferences.preferredGrinder, { advanced: variant === 'full' });
+  });
+  const [waterTempInput, setWaterTempInput] = useState<string>(() =>
+    toDisplayTemp(form.water_temp_c, preferences.temperatureUnit)
   );
-  const [form, setForm] = useState<DraftForm>(
-    () => initialDraft ?? makeDraft(defaultBeanId, 'pour-over', preferences.preferredGrinder)
-  );
-  const [waterTempInput, setWaterTempInput] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  // True once the grinder on the current draft has been decided by someone
+  // other than preference hydration: the user picked or cleared it, or the
+  // draft arrived with its own (possibly empty) grinder. Hydration then
+  // leaves it alone, so a grinder that was deliberately cleared (by the user,
+  // or later by a setup that has none) is not refilled. Reset/save start a
+  // fresh draft and clear it. Any code that applies a draft with a deliberate
+  // grinder choice (e.g. a setup) must set this too.
+  const grinderDecided = useRef(initialDraft !== undefined);
 
+  // Keep the water-temp text buffer in step with the draft's value (a default
+  // applied, a reset, a unit switch) without fighting an edit in progress:
+  // resync only when what the buffer currently means differs from the draft.
   useEffect(() => {
-    setWaterTempInput(toDisplayTemp(form.water_temp_c, preferences.temperatureUnit));
-  }, [preferences.temperatureUnit]);
+    const unit = preferences.temperatureUnit;
+    const typed = Number(waterTempInput);
+    const typedCelsius =
+      waterTempInput === '' || Number.isNaN(typed)
+        ? undefined
+        : unit === 'fahrenheit'
+          ? Math.round(((typed - 32) * 5) / 9)
+          : typed;
+    const current = form.water_temp_c === '' ? undefined : form.water_temp_c;
+    if (typedCelsius === current) return;
+    setWaterTempInput(toDisplayTemp(form.water_temp_c, unit));
+    // waterTempInput is the buffer being compared, not a trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.water_temp_c, preferences.temperatureUnit]);
 
   useEffect(() => {
     if (!defaultBeanId) return;
-    setForm((prev) =>
-      prev.bean_id
-        ? prev
-        : {
-            ...prev,
-            bean_id: defaultBeanId,
-            brew_style: brewStyle,
-          }
-    );
-  }, [defaultBeanId, brewStyle]);
+    setForm((prev) => (prev.bean_id ? prev : { ...prev, bean_id: defaultBeanId }));
+  }, [defaultBeanId]);
 
+  // Preferences can load after mount; fill the preferred grinder unless this
+  // draft's grinder was already decided (see grinderDecided).
   useEffect(() => {
-    if (!preferences.preferredGrinder) return;
-    setForm((prev) => {
-      if (prev.grinder_name) {
-        return prev;
-      }
-      return { ...prev, grinder_name: preferences.preferredGrinder };
-    });
+    if (!preferences.preferredGrinder || grinderDecided.current) return;
+    setForm((prev) => (prev.grinder_name ? prev : { ...prev, grinder_name: preferences.preferredGrinder }));
   }, [preferences.preferredGrinder]);
 
-  const isFirstBrewStyleRun = useRef(true);
-  useEffect(() => {
-    if (isFirstBrewStyleRun.current) {
-      isFirstBrewStyleRun.current = false;
-      return;
-    }
-    const preferredRatio = BREW_STYLE_PRESETS[brewStyle].ratios[0];
-    setForm((prev) => {
-      if (prev.bean_weight_g === '' || prev.water_weight_g === '') {
-        return { ...prev, brew_style: brewStyle };
-      }
-      const nextYield = Number((prev.bean_weight_g * preferredRatio).toFixed(1));
-      const shouldUpdateYield = Math.abs(prev.water_weight_g - nextYield) >= 0.1;
-      return {
-        ...prev,
-        brew_style: brewStyle,
-        water_weight_g: shouldUpdateYield ? nextYield : prev.water_weight_g,
-      };
-    });
-  }, [brewStyle]);
+  const handleStyleChange = (style: string) => {
+    setForm((prev) => applyStyle(prev, style, { advanced: isAdvanced }));
+  };
 
-  useEffect(() => {
-    if (!isAdvanced) return;
-    setForm((prev) => withAdvancedDefaults(prev));
-  }, [isAdvanced]);
+  // A fresh draft (Reset, or after a save) for the style currently selected.
+  const startFreshDraft = (beanId: string | undefined) => {
+    grinderDecided.current = false;
+    setAgitationTotals([]);
+    setForm(
+      makeDraft(beanId, form.brew_style || DEFAULT_STYLE, preferences.preferredGrinder, { advanced: isAdvanced })
+    );
+  };
 
   const handleAdvancedToggle = (checked: boolean) => {
     setIsAdvanced(checked);
     if (checked) {
-      setForm((prev) => {
-        const next = withAdvancedDefaults(prev);
-        setWaterTempInput(toDisplayTemp(next.water_temp_c, preferences.temperatureUnit));
-        return next;
-      });
+      setForm((prev) => withAdvancedDefaults(prev));
     }
   };
 
@@ -159,7 +128,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
     if (!Number.isFinite(beanWeight) || beanWeight === 0 || !Number.isFinite(waterWeight)) return undefined;
     return waterWeight / beanWeight;
   }, [beanWeight, waterWeight]);
-  const stylePresets = BREW_STYLE_PRESETS[brewStyle];
+  const brewStyle = form.brew_style ?? DEFAULT_STYLE;
+  // Undefined for a style outside the presets (an old brew, an import): no
+  // ratio chips, and the select shows the raw value as an extra option.
+  const stylePresets = getBrewStylePreset(brewStyle);
   const grinderOptions = preferences.grinders;
   const selectedGrinder =
     form.grinder_name && grinderOptions.includes(form.grinder_name) ? form.grinder_name : '';
@@ -258,12 +230,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
         total_brew_time_s: form.total_brew_time_s === '' ? undefined : form.total_brew_time_s
       };
       await onSave(payload);
-      setForm(() => {
-        const draft = makeDraft(form.bean_id, brewStyle, preferences.preferredGrinder);
-        setWaterTempInput('');
-        setAgitationTotals([]);
-        return draft;
-      });
+      startFreshDraft(form.bean_id);
     } finally {
       setSaving(false);
     }
@@ -287,6 +254,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
   };
 
   const handleGrinderSelect = (value: string) => {
+    grinderDecided.current = true;
     if (!value) {
       update('grinder_name', undefined);
       return;
@@ -306,9 +274,10 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
               Style
               <select
                 value={brewStyle}
-                onChange={(event) => setBrewStyle(event.target.value as BrewStyle)}
+                onChange={(event) => handleStyleChange(event.target.value)}
                 className="min-h-11 min-w-[170px] rounded-full border border-caramel/40 bg-espresso/60 px-3 py-1 text-crema text-sm normal-case"
               >
+                {!isBrewStyle(brewStyle) && <option value={brewStyle}>{brewStyle}</option>}
                 {Object.entries(BREW_STYLE_PRESETS).map(([value, meta]) => (
                   <option key={value} value={value}>
                     {meta.label}
@@ -341,10 +310,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
           <button
             type="button"
             className="inline-flex min-h-11 items-center justify-center min-h-11 px-1 text-caramel underline"
-            onClick={() => {
-              setForm(makeDraft(defaultBeanId, brewStyle, preferences.preferredGrinder));
-              setAgitationTotals([]);
-            }}
+            onClick={() => startFreshDraft(defaultBeanId)}
           >
             Reset
           </button>
@@ -371,8 +337,8 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
             <span className="text-xs uppercase tracking-[0.3em] text-moss">Yield (g)</span>
             <input
               type="number"
-              min={50}
-              step={1}
+              min={1}
+              step={0.1}
               value={form.water_weight_g === '' ? '' : form.water_weight_g}
               onChange={(event) =>
                 update('water_weight_g', event.target.value === '' ? '' : Number(event.target.value))
@@ -384,7 +350,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
 
         <div className="flex flex-wrap items-center gap-4 text-sm text-moss">
           <span>Ratio: {ratio ? ratio.toFixed(1) : '—'}</span>
-          {stylePresets.ratios.map((value) => {
+          {(stylePresets?.ratios ?? []).map((value) => {
             const isActive = ratio ? Math.abs(ratio - value) < 0.1 : false;
             return (
               <button
@@ -394,7 +360,7 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
                   update(
                     'water_weight_g',
                     typeof form.bean_weight_g === 'number'
-                      ? Number((form.bean_weight_g * value).toFixed(1))
+                      ? roundYield(form.bean_weight_g * value)
                       : form.water_weight_g
                   )
                 }
@@ -476,12 +442,12 @@ export function QuickLogBar({ beans, onSave, defaultBeanId, variant = 'quick', i
               </label>
               <MinSecInput
                 label="Bloom time"
-                valueSeconds={form.bloom_time_s === '' ? '' : form.bloom_time_s ?? DEFAULT_BLOOM_TIME}
+                valueSeconds={form.bloom_time_s ?? ''}
                 onChange={(seconds) => update('bloom_time_s', seconds)}
               />
               <MinSecInput
                 label="Total brew time"
-                valueSeconds={form.total_brew_time_s === '' ? '' : form.total_brew_time_s ?? DEFAULT_BREW_TIME}
+                valueSeconds={form.total_brew_time_s ?? ''}
                 onChange={(seconds) => update('total_brew_time_s', seconds)}
               />
               <label className="flex flex-col gap-1 text-sm">
