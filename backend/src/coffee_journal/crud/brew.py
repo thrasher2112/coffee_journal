@@ -45,6 +45,33 @@ def list_brews(
     return items, total
 
 
+def last_grind(
+    db: Session, user_id: str, bean_id: str, grinder_name: str
+) -> Brew | None:
+    """The user's newest brew of ``bean_id`` on ``grinder_name`` that recorded a grind.
+
+    The grinder is compared case-insensitively and trimmed, on both sides, because
+    the name is free text typed on the log form ("niche zero" vs "Niche Zero ").
+    Brews with a null or blank grind are skipped, so a brew logged without one
+    never hides an earlier brew that had one. Newest = brew date, then created_at.
+    """
+    wanted = grinder_name.strip().lower()
+    if not wanted:
+        return None
+    stmt = (
+        select(Brew)
+        .where(
+            Brew.user_id == user_id,
+            Brew.bean_id == bean_id,
+            func.lower(func.trim(Brew.grinder_name)) == wanted,
+            func.trim(Brew.grind_setting) != "",
+        )
+        .order_by(Brew.date.desc(), Brew.created_at.desc())
+        .limit(1)
+    )
+    return db.scalars(stmt).first()
+
+
 def get_brew(db: Session, brew_id: str, user_id: str) -> Brew | None:
     brew = db.get(Brew, brew_id)
     if brew and brew.user_id != user_id:

@@ -46,12 +46,16 @@ OptionalText120 = Annotated[Text120 | None, BeforeValidator(_blank_to_none)]
 
 
 class SetupCreate(BaseModel):
+    # Unknown keys are ignored (pydantic's default, as on the bean and brew
+    # schemas). That is deliberate: setups used to carry a grind_setting, so an
+    # old backup file or a stale client may still send one. Grind belongs to the
+    # bean x grinder pair and is looked up from past brews (GET
+    # /api/brews/last-grind), not stored on a setup.
     name: SetupName
     brew_style: SetupBrewStyle
     ratio: Ratio
     dose_g: DoseG | None = None
     grinder_name: OptionalText120 = None
-    grind_setting: OptionalText120 = None
     target_time_s: TargetTimeS | None = None
     machine_profile: OptionalText120 = None
 
@@ -80,7 +84,6 @@ class SetupUpdate(BaseModel):
     ratio: Ratio | None = None
     dose_g: DoseG | None = None
     grinder_name: OptionalText120 = None
-    grind_setting: OptionalText120 = None
     target_time_s: TargetTimeS | None = None
     machine_profile: OptionalText120 = None
 
@@ -101,7 +104,6 @@ class SetupRead(BaseModel):
     ratio: float
     dose_g: float | None = None
     grinder_name: str | None = None
-    grind_setting: str | None = None
     target_time_s: int | None = None
     machine_profile: str | None = None
     created_at: datetime

@@ -14,7 +14,6 @@ _SETUP_MUTABLE_FIELDS = frozenset({
     "ratio",
     "dose_g",
     "grinder_name",
-    "grind_setting",
     "target_time_s",
     "machine_profile",
 })

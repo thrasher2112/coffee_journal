@@ -685,3 +685,36 @@ def test_full_backup_round_trip_includes_setups_and_brew_snapshots(
 
     assert [s["name"] for s in _setups(client_b)] == ["Office"]
     assert client_b.get("/api/brews/").json()["items"][0]["setup_name"] == "Office"
+
+
+def test_import_old_backup_with_grind_on_setups_still_works(auth_client):
+    """Backups made before grind moved off setups carry ``grind_setting`` on them."""
+    payload = {
+        "beans": [],
+        "brews": [],
+        "setups": [
+            {
+                "id": "old-setup-1",
+                "name": "Office",
+                "brew_style": "espresso",
+                "ratio": 3,
+                "dose_g": 18,
+                "grinder_name": "Niche",
+                "grind_setting": "14",
+                "target_time_s": 36,
+                "machine_profile": "DE1",
+                "created_at": "2026-10-01T00:00:00Z",
+                "updated_at": "2026-10-01T00:00:00Z",
+            }
+        ],
+    }
+
+    resp = auth_client.post("/api/import", json=payload)
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["counts"]["setups"] == 1
+    restored = _setups(auth_client)
+    assert [s["name"] for s in restored] == ["Office"]
+    assert restored[0]["dose_g"] == 18
+    assert restored[0]["grinder_name"] == "Niche"
+    assert "grind_setting" not in restored[0]

@@ -50,6 +50,13 @@ class BrewBase(BaseModel):
         return _dedupe_tags(value)
 
 
+class LastGrind(BaseModel):
+    """Answer to GET /api/brews/last-grind: the grind of the newest matching brew."""
+
+    grind_setting: str
+    date: dt.date
+
+
 class BrewCreate(BrewBase):
     pass
 

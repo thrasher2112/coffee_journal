@@ -10,7 +10,7 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..models.user import User
 from ..rate_limit import limiter
-from ..schemas.brew import BrewCreate, BrewListResponse, BrewRead, BrewUpdate
+from ..schemas.brew import BrewCreate, BrewListResponse, BrewRead, BrewUpdate, LastGrind
 
 router = APIRouter()
 
@@ -63,6 +63,30 @@ def create_brew(
     brew = crud.brew.create_brew(db, data)
     db.refresh(brew, attribute_names=["bean"])
     return _to_schema(brew)
+
+
+# Declared before "/{brew_id}" so "last-grind" is never read as a brew id (the
+# path-param route would otherwise match it and 404).
+@router.get("/last-grind", response_model=LastGrind | None)
+def get_last_grind(
+    bean_id: str = Query(..., min_length=1, max_length=36),
+    grinder_name: str = Query(..., min_length=1, max_length=120),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Prefill source for the grind input: the grind the user last used for this
+    bean on this grinder.
+
+    200 with ``{"grind_setting", "date"}`` (the brew's date), or 200 with a JSON
+    ``null`` body when there is no such brew - including when the bean id belongs
+    to someone else or does not exist, so the endpoint reveals nothing about
+    other accounts. "No suggestion" is an ordinary answer, not an error, hence
+    no 404.
+    """
+    brew = crud.brew.last_grind(db, current_user.id, bean_id, grinder_name)
+    if brew is None:
+        return None
+    return LastGrind(grind_setting=brew.grind_setting.strip(), date=brew.date)
 
 
 @router.get("/{brew_id}", response_model=BrewRead)

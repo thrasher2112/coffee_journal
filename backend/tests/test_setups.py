@@ -28,7 +28,6 @@ def test_create_returns_201_with_all_fields(auth_client):
             "ratio": 3,
             "dose_g": 18,
             "grinder_name": "Niche Zero",
-            "grind_setting": "14",
             "target_time_s": 36,
             "machine_profile": "Extractamundo Dos!",
         },
@@ -42,7 +41,6 @@ def test_create_returns_201_with_all_fields(auth_client):
     assert body["ratio"] == 3
     assert body["dose_g"] == 18
     assert body["grinder_name"] == "Niche Zero"
-    assert body["grind_setting"] == "14"
     assert body["target_time_s"] == 36
     assert body["machine_profile"] == "Extractamundo Dos!"
     assert body["created_at"]
@@ -55,7 +53,6 @@ def test_create_minimal_leaves_optionals_null(auth_client):
 
     assert body["dose_g"] is None
     assert body["grinder_name"] is None
-    assert body["grind_setting"] is None
     assert body["target_time_s"] is None
     assert body["machine_profile"] is None
 
@@ -100,7 +97,6 @@ def test_patch_null_clears_optional_fields(auth_client):
         auth_client,
         dose_g=18,
         grinder_name="Niche",
-        grind_setting="14",
         target_time_s=36,
         machine_profile="DE1",
     )
@@ -110,7 +106,6 @@ def test_patch_null_clears_optional_fields(auth_client):
         json={
             "dose_g": None,
             "grinder_name": None,
-            "grind_setting": None,
             "target_time_s": None,
             "machine_profile": None,
         },
@@ -118,7 +113,7 @@ def test_patch_null_clears_optional_fields(auth_client):
 
     assert resp.status_code == 200
     body = resp.json()
-    for field in ("dose_g", "grinder_name", "grind_setting", "target_time_s", "machine_profile"):
+    for field in ("dose_g", "grinder_name", "target_time_s", "machine_profile"):
         assert body[field] is None
     assert body["name"] == "Office"
 
@@ -272,7 +267,6 @@ def test_unknown_style_on_patch_422(auth_client):
     [
         ("name", 80),
         ("grinder_name", 120),
-        ("grind_setting", 120),
         ("machine_profile", 120),
     ],
 )
@@ -517,7 +511,7 @@ def test_unauthenticated_401(client):
 
 # --- Optional text normalisation --------------------------------------------
 
-OPTIONAL_TEXT = ("grinder_name", "grind_setting", "machine_profile")
+OPTIONAL_TEXT = ("grinder_name", "machine_profile")
 
 
 @pytest.mark.parametrize("field", OPTIONAL_TEXT)
@@ -567,3 +561,35 @@ def test_validation_handler_survives_nan_on_other_routes(auth_client):
     detail = resp.json()["detail"]
     assert isinstance(detail, list) and detail
     assert detail[0]["input"] == "nan"
+
+
+# --- Grind no longer lives on a setup ---------------------------------------
+# It is prefilled from the last brew of the bean on the grinder instead
+# (tests/test_last_grind.py). Unknown keys are ignored, as on every other schema,
+# so stale clients and old backup files keep working.
+
+
+def test_setup_has_no_grind_setting_column():
+    assert not hasattr(BrewSetup, "grind_setting")
+
+
+def test_create_ignores_grind_setting_and_does_not_return_it(auth_client):
+    body = _create(auth_client, grind_setting="14")
+
+    assert "grind_setting" not in body
+    assert "grind_setting" not in auth_client.get(f"/api/setups/{body['id']}").json()
+    assert all("grind_setting" not in s for s in auth_client.get("/api/setups").json())
+
+
+def test_patch_ignores_grind_setting(auth_client):
+    created = _create(auth_client, dose_g=18)
+
+    resp = auth_client.patch(
+        f"/api/setups/{created['id']}", json={"grind_setting": "99", "ratio": 2.5}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ratio"] == 2.5
+    assert body["dose_g"] == 18
+    assert "grind_setting" not in body

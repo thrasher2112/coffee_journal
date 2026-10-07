@@ -28,7 +28,6 @@ class BrewSetup(Base):
     ratio: Mapped[float] = mapped_column(Float, nullable=False)
     dose_g: Mapped[float | None] = mapped_column(Float)
     grinder_name: Mapped[str | None] = mapped_column(String(120))
-    grind_setting: Mapped[str | None] = mapped_column(String(120))
     target_time_s: Mapped[int | None] = mapped_column(Integer)
     machine_profile: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(
