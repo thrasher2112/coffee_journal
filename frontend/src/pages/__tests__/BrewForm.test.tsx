@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   fetchBeans: vi.fn(),
   fetchSetups: vi.fn(),
   createBrew: vi.fn(),
+  fetchLastGrind: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('../../lib/api', () => api);

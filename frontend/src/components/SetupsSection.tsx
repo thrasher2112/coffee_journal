@@ -39,13 +39,7 @@ export function summarizeSetup(setup: BrewSetup): string {
   }
   parts.push(formatRatio(setup.ratio));
   if (setup.target_time_s != null) parts.push(formatMinSec(setup.target_time_s));
-  if (setup.grinder_name && setup.grind_setting) {
-    parts.push(`${setup.grinder_name} @ ${setup.grind_setting}`);
-  } else if (setup.grinder_name) {
-    parts.push(setup.grinder_name);
-  } else if (setup.grind_setting) {
-    parts.push(`grind ${setup.grind_setting}`);
-  }
+  if (setup.grinder_name) parts.push(setup.grinder_name);
   if (setup.machine_profile) parts.push(setup.machine_profile);
   return parts.join(', ');
 }
@@ -57,7 +51,6 @@ interface FormState {
   dose: string;
   target_time_s: number | '';
   grinder_name: string;
-  grind_setting: string;
   machine_profile: string;
 }
 
@@ -68,7 +61,6 @@ const EMPTY_FORM: FormState = {
   dose: '',
   target_time_s: '',
   grinder_name: '',
-  grind_setting: '',
   machine_profile: ''
 };
 
@@ -80,7 +72,6 @@ function formFromSetup(setup: BrewSetup): FormState {
     dose: setup.dose_g == null ? '' : String(setup.dose_g),
     target_time_s: setup.target_time_s ?? '',
     grinder_name: setup.grinder_name ?? '',
-    grind_setting: setup.grind_setting ?? '',
     machine_profile: setup.machine_profile ?? ''
   };
 }
@@ -123,11 +114,9 @@ export function buildInput(form: FormState): BrewSetupInput | string {
   }
 
   const grinder = textOrNull(form.grinder_name);
-  const setting = textOrNull(form.grind_setting);
   const machine = textOrNull(form.machine_profile);
   for (const [label, value] of [
     ['Grinder', grinder],
-    ['Grind setting', setting],
     ['Machine profile', machine]
   ] as const) {
     if (value && charCount(value) > TEXT_MAX) return `${label} must be ${TEXT_MAX} characters or fewer.`;
@@ -139,7 +128,6 @@ export function buildInput(form: FormState): BrewSetupInput | string {
     ratio,
     dose_g: dose,
     grinder_name: grinder,
-    grind_setting: setting,
     target_time_s: time === '' ? null : time,
     machine_profile: machine
   };
@@ -458,15 +446,6 @@ export function SetupsSection() {
                       <option key={grinder} value={grinder} />
                     ))}
                   </datalist>
-                </Field>
-                <Field id="setup-grind-setting" label="Grind setting">
-                  <input
-                    id="setup-grind-setting"
-                    type="text"
-                    value={form.grind_setting}
-                    onChange={(e) => update('grind_setting', e.target.value)}
-                    className={inputClass}
-                  />
                 </Field>
                 <Field id="setup-machine" label="Machine profile">
                   <input

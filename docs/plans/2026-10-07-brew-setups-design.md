@@ -39,7 +39,6 @@ New table `brew_setups`:
 | `ratio` | Float, not null | finite, > 0, ≤ 30; fractional allowed (2.5) |
 | `dose_g` | Float, nullable | finite, > 0 |
 | `grinder_name` | String(120), nullable | |
-| `grind_setting` | String(120), nullable | |
 | `target_time_s` | Integer, nullable | ≥ 0 |
 | `machine_profile` | String(120), nullable | free text, e.g. "Extractamundo Dos!" |
 | `created_at` / `updated_at` | DateTime(tz) | |
@@ -62,6 +61,16 @@ Snapshots give historical provenance and still allow filtering "all Office ·
 Espresso brews" by name. Trade-off accepted: renaming a setup does not relabel
 past brews.
 
+**No `grind_setting` on a setup.** The first cut had one (migration 12 added the
+column); owner testing showed it does not belong there. Grind depends on the
+bean *and* the grinder, and drifts as a bag ages, so a fixed value on a setup is
+wrong most of the time. Migration 14 drops the column (12 stays as shipped: it is
+already applied on live databases). Instead the log form prefills the grind from
+the last brew of the same bean on the same grinder, which brews already record
+(`grind_setting` + `grinder_name`); no new bean field. Setup schemas ignore
+unknown keys, so an old backup or stale client that still sends `grind_setting`
+on a setup is accepted and the value dropped.
+
 One Alembic migration for the table; the brew columns may share it or follow
 it (never two parallel heads).
 
@@ -75,6 +84,16 @@ New `routers/setups.py` (no `from __future__ import annotations` — router rule
   `_SETUP_MUTABLE_FIELDS` allowlist. Explicit `null` clears an optional field.
   409 on rename collision.
 - `DELETE /api/setups/{id}` — 204. No brew is touched (snapshots only).
+
+Grind prefill lives on the brews router, declared before `/{brew_id}`:
+
+- `GET /api/brews/last-grind?bean_id=&grinder_name=` — the caller's newest brew
+  of that bean whose `grinder_name` matches case-insensitively and trimmed and
+  whose `grind_setting` is non-blank (order: brew `date`, then `created_at`).
+  200 `{grind_setting, date}` (the brew's date), or 200 with a JSON `null` body
+  when there is none - including another user's or an unknown bean id, so
+  nothing leaks and "no suggestion" is not an error. Both params required
+  (`bean_id` ≤ 36, `grinder_name` ≤ 120, else 422). Authenticated, user-scoped.
 
 All endpoints `Depends(get_current_user)`; all CRUD filters by `user_id`
 (another user's id → 404). Writes carry `@limiter.limit(...)` from the shared
@@ -107,9 +126,27 @@ explicit transitions:
 - *Pick a style manually* → apply that style's defaults (yield from `ratios[0]`).
 - *Pick a setup* → in one state update, replace all setup-controlled fields:
   `brew_style`, `bean_weight_g` (if `dose_g` set), `water_weight_g` =
-  dose × ratio, `grinder_name`, `grind_setting` (cleared when the setup leaves
-  them null), `total_brew_time_s` = `target_time_s` (prefilled as an editable
+  dose × ratio, `grinder_name` (cleared when the setup leaves it null),
+  `total_brew_time_s` = `target_time_s` (prefilled as an editable
   value), `machine_profile`, `setup_name`.
+  A setup never touches `grind_setting`: a typed or prefilled grind survives it.
+- *Grind prefill* - an effect keyed on (bean, normalised grinder), the one
+  legitimate effect here (it syncs with the server, unlike the removed style
+  effect). With both set and the grind not yet *decided*, it asks
+  `fetchLastGrind` and fills the grind, with a hint beside the grind input
+  ("from your 3 Oct brew", tied to the input by `aria-describedby`). Triggers:
+  bean change, grinder change (setup apply, grinder select, preference
+  hydration), a fresh draft after save/reset (the brew just saved is now the
+  newest), initial mount. Rules: typing in the grind input decides it (an
+  explicit `grindDecided` ref, like `grinderDecided`) and the lookup never
+  overwrites it; an `initialDraft` with a non-empty grind counts as decided;
+  Reset/save clear the flag. A response is applied only if bean and normalised
+  grinder still match the request and the grind is still undecided. If the bean
+  or grinder changes after a *prefilled* grind, that grind is cleared at once
+  and looked up again; no result leaves it empty. Offline or failing: silently
+  no prefill, the form never waits. The grind input (and so the hint) is an
+  advanced-form field; the quick form prefills the value invisibly, like the
+  preferred grinder.
 - *Incoming draft* (edit/navigate with `initialDraft`) wins over last-used
   defaults.
 - *Preference hydration* must not refill a grinder the setup intentionally left
@@ -154,6 +191,11 @@ Backend (pytest, `make_client(user)` for tenancy):
 - duplicate name (incl. different case) → 409 on create and rename.
 - user B cannot read/update/delete user A's setup (404).
 - brew round-trips `setup_name` / `machine_profile`.
+- `last-grind`: match; grinder case/whitespace; newest by date then created_at;
+  other grinder/bean ignored; null/blank grind skipped; other user's data
+  invisible; null body when none; param bounds and missing params → 422.
+- setups neither accept nor return `grind_setting`; an old-shaped import with it
+  on its setups still works.
 - export includes setups; import skips name collisions; v1-shaped payload
   without `setups` still imports.
 
@@ -164,6 +206,12 @@ Frontend (vitest):
   refill it.
 - last-used setup is selected on load, scoped per user; stale id ignored.
 - `initialDraft` beats last-used.
+- grind prefill: fills with hint on bean + grinder; no grinder → no lookup; a
+  typed grind is never overwritten (late response too); stale response dropped
+  (bean or grinder changed, or Reset); bean change re-prefills, clears when none
+  or on failure; setup apply then lookup fills; `initialDraft` grind kept;
+  failure harmless; saved payload carries the prefilled grind; StrictMode.
+- `applySetup` leaves the grind alone.
 - Settings: create/edit/delete, 409 message.
 - BrewCard renders setup name / profile; unknown style doesn't crash.
 

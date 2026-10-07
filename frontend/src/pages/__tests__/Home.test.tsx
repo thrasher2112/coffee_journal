@@ -13,6 +13,7 @@ const api = vi.hoisted(() => {
     fetchMetrics: vi.fn(),
     fetchSetups: vi.fn(),
     createBrew: vi.fn(),
+    fetchLastGrind: vi.fn().mockResolvedValue(null),
   };
 });
 

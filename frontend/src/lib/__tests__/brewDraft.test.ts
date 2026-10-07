@@ -132,7 +132,6 @@ describe('applySetup', () => {
     ratio: 3,
     dose_g: 18,
     grinder_name: 'Niche',
-    grind_setting: '14',
     target_time_s: 36,
     machine_profile: 'Extractamundo Dos!',
   };
@@ -147,12 +146,18 @@ describe('applySetup', () => {
       bean_weight_g: 18,
       water_weight_g: 54,
       grinder_name: 'Niche',
-      grind_setting: '14',
       total_brew_time_s: 36,
       machine_profile: 'Extractamundo Dos!',
       setup_name: 'Office · Espresso',
     });
     expect(draft.brew_style).toBe('pour-over');
+  });
+
+  it('never touches the grind: a typed or prefilled grind survives a setup apply', () => {
+    const draft = { ...makeDraft({ beanId: 'b', grinder: 'Comandante' }), grind_setting: '20' };
+    expect(applySetup(draft, office, { advanced: false }).grind_setting).toBe('20');
+    expect(applySetup({ ...draft, grind_setting: '' }, office, { advanced: false }).grind_setting).toBe('');
+    expect(applySetup(draft, { id: 's2', name: 'Bare', brew_style: 'pour-over', ratio: 16 }, { advanced: true }).grind_setting).toBe('20');
   });
 
   it('uses the setup dose over the draft dose, and rounds the yield to one decimal', () => {
@@ -185,7 +190,7 @@ describe('applySetup', () => {
     expect(next).toMatchObject({ bean_weight_g: '', water_weight_g: 123 });
   });
 
-  it('clears grinder, grind setting, target time and profile that the setup leaves null', () => {
+  it('clears grinder, target time and profile that the setup leaves null', () => {
     const draft = {
       ...makeDraft({ beanId: 'b', grinder: 'Comandante' }),
       grind_setting: '20',
@@ -196,7 +201,6 @@ describe('applySetup', () => {
     const bare: BrewSetup = { id: 's2', name: 'Bare', brew_style: 'pour-over', ratio: 16 };
     const next = applySetup(draft, bare, { advanced: false });
     expect(next.grinder_name).toBeUndefined();
-    expect(next.grind_setting).toBe('');
     expect(next.total_brew_time_s).toBeUndefined();
     expect(next.machine_profile).toBeUndefined();
     expect(next.setup_name).toBe('Bare');

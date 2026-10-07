@@ -41,7 +41,6 @@ const OFFICE = {
   ratio: 3,
   dose_g: 18,
   grinder_name: 'Extractamundo Dos!',
-  grind_setting: null,
   target_time_s: 36,
   machine_profile: null,
   created_at: '2026-10-07T00:00:00Z',
@@ -55,7 +54,6 @@ const MINIMAL = {
   ratio: 16,
   dose_g: null,
   grinder_name: null,
-  grind_setting: null,
   target_time_s: null,
   machine_profile: null,
   created_at: '2026-10-07T00:00:00Z',
@@ -98,12 +96,10 @@ describe('SetupsSection', () => {
     expect(within(plain).getByText('1:16')).toBeInTheDocument();
   });
 
-  it('formats decimal ratios without trailing zeros and includes grind setting and machine', async () => {
-    await renderLoaded([
-      { ...OFFICE, ratio: 2.5, dose_g: 18, grind_setting: '5.5', machine_profile: 'Lever, 9 bar' }
-    ]);
+  it('formats decimal ratios without trailing zeros and includes grinder and machine', async () => {
+    await renderLoaded([{ ...OFFICE, ratio: 2.5, dose_g: 18, machine_profile: 'Lever, 9 bar' }]);
     expect(
-      screen.getByText('18 g → 45 g, 1:2.5, 0:36, Extractamundo Dos! @ 5.5, Lever, 9 bar')
+      screen.getByText('18 g → 45 g, 1:2.5, 0:36, Extractamundo Dos!, Lever, 9 bar')
     ).toBeInTheDocument();
   });
 
@@ -129,7 +125,6 @@ describe('SetupsSection', () => {
       ratio: 2.5,
       dose_g: null,
       grinder_name: null,
-      grind_setting: null,
       target_time_s: null,
       machine_profile: null
     });
@@ -150,7 +145,6 @@ describe('SetupsSection', () => {
     fireEvent.change(screen.getByLabelText('Target time minutes'), { target: { value: '0' } });
     fireEvent.change(screen.getByLabelText('Target time seconds'), { target: { value: '36' } });
     type('Grinder', 'Extractamundo Dos!');
-    type('Grind setting', '4.2');
     type('Machine profile', 'Lever');
     fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
 
@@ -161,7 +155,6 @@ describe('SetupsSection', () => {
       ratio: 3,
       dose_g: 18.5,
       grinder_name: 'Extractamundo Dos!',
-      grind_setting: '4.2',
       target_time_s: 36,
       machine_profile: 'Lever'
     });
@@ -174,6 +167,13 @@ describe('SetupsSection', () => {
       .getAllByRole('option')
       .map((o) => (o as HTMLOptionElement).value);
     expect(options).toEqual(['pour-over', 'aeropress', 'french-press', 'espresso']);
+  });
+
+  it('has no grind setting field and does not mention a grind in the summary', async () => {
+    await renderLoaded([{ ...OFFICE, dose_g: 18 }]);
+    expect(screen.queryByText(/grind/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /add setup/i }));
+    expect(screen.queryByLabelText(/grind setting/i)).toBeNull();
   });
 
   it('offers preference grinders as suggestions', async () => {
@@ -208,20 +208,20 @@ describe('SetupsSection', () => {
   });
 
   it('edit prefills the form and sends null for a cleared optional field, only changed fields', async () => {
-    await renderLoaded([{ ...OFFICE, grind_setting: '5', machine_profile: 'Lever' }]);
-    api.updateSetup.mockResolvedValue({ ...OFFICE, grind_setting: null, machine_profile: 'Lever' });
+    await renderLoaded([{ ...OFFICE, machine_profile: 'Lever' }]);
+    api.updateSetup.mockResolvedValue({ ...OFFICE, machine_profile: null });
 
     fireEvent.click(screen.getByRole('button', { name: /edit office/i }));
     expect(screen.getByLabelText('Setup name')).toHaveValue('Office');
-    expect(screen.getByLabelText('Grind setting')).toHaveValue('5');
+    expect(screen.getByLabelText('Machine profile')).toHaveValue('Lever');
     expect(screen.getByLabelText('Ratio (1:x)')).toHaveValue(3);
     expect(screen.getByLabelText('Target time seconds')).toHaveValue(36);
 
-    type('Grind setting', '');
+    type('Machine profile', '');
     fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
 
     await waitFor(() => expect(api.updateSetup).toHaveBeenCalledTimes(1));
-    expect(api.updateSetup).toHaveBeenCalledWith('s1', { grind_setting: null });
+    expect(api.updateSetup).toHaveBeenCalledWith('s1', { machine_profile: null });
     expect(api.createSetup).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole('button', { name: /save setup/i })).toBeNull());
   });
@@ -355,7 +355,6 @@ describe('SetupsSection', () => {
       dose: '',
       target_time_s: '' as const,
       grinder_name: '',
-      grind_setting: '',
       machine_profile: ''
     };
     expect(buildInput({ ...base, ratio: 'abc' })).toMatch(/enter a number/i);
@@ -371,7 +370,6 @@ describe('SetupsSection', () => {
       dose: '',
       target_time_s: '' as const,
       grinder_name: '',
-      grind_setting: '',
       machine_profile: ''
     };
     expect(buildInput({ ...base, dose: '0.05' })).toMatch(/at least 0\.1/i);
@@ -417,7 +415,7 @@ describe('SetupsSection', () => {
     api.updateSetup.mockReturnValue(new Promise((r) => (finish = r)));
 
     fireEvent.click(screen.getByRole('button', { name: /edit office/i }));
-    type('Grind setting', '7');
+    type('Machine profile', 'Lever 7');
     fireEvent.click(screen.getByRole('button', { name: /save setup/i }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled());
@@ -426,10 +424,10 @@ describe('SetupsSection', () => {
     expect(screen.getByRole('button', { name: /delete office/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /save setup/i })).toBeDisabled();
 
-    finish({ ...OFFICE, grind_setting: '7' });
+    finish({ ...OFFICE, machine_profile: 'Lever 7' });
     await waitFor(() => expect(screen.queryByRole('button', { name: /save setup/i })).toBeNull());
     expect(screen.getByRole('button', { name: /edit plain v60/i })).toBeEnabled();
-    expect(screen.getByText(/@ 7|, 7/)).toBeInTheDocument();
+    expect(screen.getByText(/Lever 7/)).toBeInTheDocument();
   });
 
   it('locks the actions while a delete is in flight', async () => {
@@ -482,3 +480,4 @@ describe('SetupsSection', () => {
     expect(screen.queryByRole('button', { name: /add setup/i })).toBeNull();
   });
 });
+

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AromaTag, Bean, BrewDraft, BrewSetup, FlavorTag } from '../types';
+import { fetchLastGrind } from '../lib/api';
 import { BeanPicker } from './BeanPicker';
 import { FlavorWheel } from './FlavorWheel';
 import { AromaTags } from './AromaTags';
@@ -53,6 +54,24 @@ const findSetupByName = (setups: BrewSetup[], name: string | null | undefined) =
   const wanted = name?.toLowerCase();
   return wanted ? setups.find((setup) => setup.name.toLowerCase() === wanted) : undefined;
 };
+
+// Grinder names are free text, so "niche zero " and "Niche Zero" are one grinder
+// (the API matches the same way).
+const normalizeGrinder = (name: string | undefined): string => (name ?? '').trim().toLowerCase();
+
+// "3 Oct" from the API's YYYY-MM-DD, built in local time so the day never
+// shifts with the timezone. Anything unparseable falls back to the raw string.
+const formatBrewDate = (iso: string): string => {
+  const [year, month, day] = iso.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (!year || !month || !day || Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+interface GrindPrefill {
+  grind: string;
+  date: string;
+}
 
 const toDisplayTemp = (celsius: number | '' | undefined, unit: TemperatureUnit) => {
   if (celsius === '' || celsius === undefined) return '';
@@ -108,6 +127,26 @@ export function QuickLogBar({
   const autoApplyDone = useRef(initialDraft !== undefined);
   const touched = useRef(false);
 
+  // The grind input is prefilled from the last brew of this bean on this
+  // grinder (see the lookup effect below). `grindDecided` is true once someone
+  // other than that lookup owns the value: the user typed in the grind input,
+  // or the draft arrived with a grind of its own. A decided grind is never
+  // overwritten, and Reset/save (a fresh draft) clear the flag. `prefill`
+  // records what the lookup wrote (value + brew date, for the hint); it is set
+  // exactly while the grind in the form is a prefilled one, and the ref mirrors
+  // it for the effect, which must not depend on it. `draftNonce` re-runs the
+  // lookup for a fresh draft whose bean and grinder did not change.
+  const grindDecided = useRef(!!initialDraft?.grind_setting?.trim());
+  const [prefill, setPrefillState] = useState<GrindPrefill | null>(null);
+  const prefillRef = useRef<GrindPrefill | null>(null);
+  const setPrefill = (next: GrindPrefill | null) => {
+    prefillRef.current = next;
+    setPrefillState(next);
+  };
+  const [draftNonce, setDraftNonce] = useState(0);
+  // Latest form, for the lookup's stale check when its response arrives.
+  const formRef = useRef(form);
+
   // The selected chip is derived from the draft's setup_name (case-insensitive;
   // names are unique per user), so it is one source of truth: an incoming
   // draft shows its chip selected with no re-apply, editing fields leaves it
@@ -137,6 +176,57 @@ export function QuickLogBar({
     // waterTempInput is the buffer being compared, not a trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.water_temp_c, preferences.temperatureUnit]);
+
+  useEffect(() => {
+    formRef.current = form;
+  });
+
+  // Prefill the grind from the last brew of this bean on this grinder. Keyed on
+  // the bean and the normalised grinder (however they got there: bean pick,
+  // grinder select, setup apply, preference hydration, initial mount), plus the
+  // fresh-draft nonce. External sync, so an effect is the right tool - unlike
+  // style/yield defaults, which are explicit transitions.
+  const lookupBeanId = form.bean_id;
+  const lookupKey = normalizeGrinder(form.grinder_name);
+  useEffect(() => {
+    if (grindDecided.current) return;
+    // The bean or grinder moved on from what an earlier lookup filled in: that
+    // grind belongs to the old pair, so drop it (and its hint) now. A new
+    // lookup below may put a new one in; a failed or empty one leaves it blank.
+    const stale = prefillRef.current;
+    if (stale) {
+      setPrefill(null);
+      setForm((prev) => (prev.grind_setting === stale.grind ? { ...prev, grind_setting: '' } : prev));
+    }
+    if (!lookupBeanId || !lookupKey) return;
+
+    // Set by cleanup: the key changed, a fresh draft began, or the component
+    // unmounted (or StrictMode's dev-only double mount) - the response is stale.
+    let cancelled = false;
+    // The grinder as typed, trimmed; the API matches it case-insensitively.
+    fetchLastGrind(lookupBeanId, formRef.current.grinder_name?.trim() ?? '')
+      .then((result) => {
+        const grind = result?.grind_setting?.trim();
+        if (cancelled || grindDecided.current || !result || !grind) return;
+        const latest = formRef.current;
+        if (
+          latest.bean_id !== lookupBeanId ||
+          normalizeGrinder(latest.grinder_name) !== lookupKey ||
+          latest.grind_setting?.trim()
+        ) {
+          return;
+        }
+        // Raw setForm, not update(): a prefill is not a user edit, so it must
+        // not block the last-used setup auto-apply.
+        setForm((prev) => ({ ...prev, grind_setting: grind }));
+        setPrefill({ grind, date: result.date });
+      })
+      // Offline or failing: no suggestion. The form never waits on this.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lookupBeanId, lookupKey, draftNonce]);
 
   useEffect(() => {
     if (!defaultBeanId) return;
@@ -221,6 +311,12 @@ export function QuickLogBar({
     // A setup also decides the grinder (even an empty one); without one, the
     // preferred grinder hydrates again.
     grinderDecided.current = setup !== undefined;
+    // The grind is looked up afresh for the new draft: it starts undecided and
+    // unprefilled, and the nonce re-runs the lookup even when bean and grinder
+    // are unchanged (after a save, the brew just saved is now the newest).
+    grindDecided.current = false;
+    setPrefill(null);
+    setDraftNonce((n) => n + 1);
     if (setup) draft = applySetup(draft, setup, { advanced: isAdvanced });
     setForm(draft);
   };
@@ -396,6 +492,15 @@ export function QuickLogBar({
     }
     const celsius = preferences.temperatureUnit === 'fahrenheit' ? convertFToC(parsed) : parsed;
     update('water_temp_c', celsius);
+  };
+
+  // Typing takes ownership of the grind: the lookup never overwrites it, the
+  // hint (which described a suggestion) goes away, and a response still in
+  // flight is dropped when it lands.
+  const handleGrindChange = (value: string) => {
+    grindDecided.current = true;
+    setPrefill(null);
+    update('grind_setting', value);
   };
 
   const handleGrinderSelect = (value: string) => {
@@ -640,16 +745,25 @@ export function QuickLogBar({
                   {extraGrinder && <option value={extraGrinder}>{extraGrinder}</option>}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
-                <input
-                  type="text"
-                  value={form.grind_setting ?? ''}
-                  placeholder="e.g., 18, 7.5, 24 clicks"
-                  onChange={(event) => update('grind_setting', event.target.value)}
-                  className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
-                />
-              </label>
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-[0.3em] text-moss">Grind setting</span>
+                  <input
+                    type="text"
+                    value={form.grind_setting ?? ''}
+                    placeholder="e.g., 18, 7.5, 24 clicks"
+                    aria-describedby={prefill ? 'grind-prefill-hint' : undefined}
+                    onChange={(event) => handleGrindChange(event.target.value)}
+                    className="rounded-lg border border-caramel/40 bg-espresso/60 px-3 py-2 text-crema"
+                  />
+                </label>
+                {/* Outside the label so it is a description, not part of the input's name. */}
+                {prefill && (
+                  <p id="grind-prefill-hint" className="text-xs text-moss">
+                    from your {formatBrewDate(prefill.date)} brew
+                  </p>
+                )}
+              </div>
               {machineProfileField}
             </div>
             <div className="space-y-4">

@@ -5,6 +5,7 @@ import type {
   BrewSetup,
   BrewSetupInput,
   BrewSetupUpdate,
+  LastGrind,
   MetricsOverview,
   User
 } from '../types';
@@ -166,6 +167,16 @@ export async function createBrew(brew: BrewDraft): Promise<Brew> {
 // ---- Setups ----
 // No trailing slash: the API 307-redirects /api/setups/ and a redirected POST
 // is not guaranteed to keep its body.
+
+/**
+ * The grind the user last used for this bean on this grinder, or null when
+ * there is none (the API answers 200 with a null body). The grinder is matched
+ * case-insensitively and trimmed server-side.
+ */
+export async function fetchLastGrind(beanId: string, grinderName: string): Promise<LastGrind | null> {
+  const params = new URLSearchParams({ bean_id: beanId, grinder_name: grinderName });
+  return request<LastGrind | null>(`/api/brews/last-grind?${params.toString()}`);
+}
 
 export async function fetchSetups(): Promise<BrewSetup[]> {
   return request<BrewSetup[]>(`/api/setups`);

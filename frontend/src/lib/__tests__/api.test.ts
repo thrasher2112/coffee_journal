@@ -83,17 +83,30 @@ describe('api request()', () => {
       expect(JSON.parse(init.body)).toEqual({ name: 'Office', brew_style: 'espresso', ratio: 2.5 });
 
       ok(200, { id: 's2' });
-      await updateSetup('s2', { grind_setting: null });
+      await updateSetup('s2', { machine_profile: null });
       [url, init] = (globalThis.fetch as any).mock.calls[2];
       expect(url).toBe('/api/setups/s2');
       expect(init.method).toBe('PATCH');
-      expect(JSON.parse(init.body)).toEqual({ grind_setting: null });
+      expect(JSON.parse(init.body)).toEqual({ machine_profile: null });
 
       ok(204);
       expect(await deleteSetup('s2')).toBeUndefined();
       [url, init] = (globalThis.fetch as any).mock.calls[3];
       expect(url).toBe('/api/setups/s2');
       expect(init.method).toBe('DELETE');
+    });
+
+    it('fetchLastGrind encodes both params on the slash-less route and passes a null body through', async () => {
+      const { fetchLastGrind } = await import('../api');
+
+      ok(200, { grind_setting: '14', date: '2026-10-03' });
+      expect(await fetchLastGrind('bean 1', 'Niche & Zero')).toEqual({ grind_setting: '14', date: '2026-10-03' });
+      const [url, init] = (globalThis.fetch as any).mock.calls[0];
+      expect(url).toBe('/api/brews/last-grind?bean_id=bean+1&grinder_name=Niche+%26+Zero');
+      expect(init.credentials).toBe('include');
+
+      ok(200, null);
+      expect(await fetchLastGrind('b', 'g')).toBeNull();
     });
 
     it('exposes the HTTP status on rejected requests', async () => {

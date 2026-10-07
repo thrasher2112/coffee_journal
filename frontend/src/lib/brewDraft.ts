@@ -139,9 +139,12 @@ export const setupChipLabel = (setup: Pick<BrewSetup, 'name' | 'ratio'>): string
 // through applyStyle (which would reset the yield to the style's first ratio
 // and clear bloom/total): the yield is the setup's dose x ratio, using the
 // setup's dose or else the draft's current numeric dose (with neither, the
-// yield is left alone, as when it would round below MIN_YIELD_G). grinder_name, grind_setting, total_brew_time_s,
+// yield is left alone, as when it would round below MIN_YIELD_G). grinder_name, total_brew_time_s,
 // machine_profile and setup_name are replaced even when the setup leaves them
-// null, so nothing from a previous setup lingers. Setups carry no bloom, so
+// null, so nothing from a previous setup lingers. grind_setting is NOT
+// touched: setups carry no grind (it belongs to the bean x grinder pair and is
+// prefilled from the last matching brew, see fetchLastGrind), so a grind the
+// user typed or a lookup prefilled survives the apply. Setups carry no bloom, so
 // bloom is left as is - except an untouched bloom default carried from a
 // timed style into one without (espresso), cleared as applyStyle does so it is
 // not saved on a ~30 s shot. agitation_events are left untouched.
@@ -162,7 +165,6 @@ export function applySetup(draft: DraftForm, setup: BrewSetup, options: { advanc
     ...draft,
     brew_style: setup.brew_style,
     grinder_name: setup.grinder_name ?? undefined,
-    grind_setting: setup.grind_setting ?? '',
     total_brew_time_s: setup.target_time_s ?? undefined,
     machine_profile: setup.machine_profile ?? undefined,
     setup_name: setup.name,
