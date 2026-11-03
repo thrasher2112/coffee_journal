@@ -10,6 +10,10 @@ A personal coffee brewing journal with passwordless authentication, multi-tenant
 [![CI](https://github.com/thrasher2112/coffee_journal/actions/workflows/ci.yml/badge.svg)](https://github.com/thrasher2112/coffee_journal/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+<img width="1147" height="489" alt="Screenshot from 2026-11-03 09-20-23" src="https://github.com/user-attachments/assets/b7997c26-ceed-437b-8e07-be231c994fb9" />
+
+<img width="944" height="791" alt="Screenshot from 2026-11-03 09-21-32" src="https://github.com/user-attachments/assets/9e5392f1-4208-4c35-8567-58180ecf65fe" />
+
 
 ---
 
